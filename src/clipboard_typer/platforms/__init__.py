@@ -1,0 +1,1 @@
+"""ClipboardTyper platforms package."""

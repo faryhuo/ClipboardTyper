@@ -50,8 +50,8 @@ if not errorlevel 1 goto install_package
 if errorlevel 1 goto failed
 
 :install_package
-echo [3/3] Installing or updating PyInstaller...
-".venv-build\Scripts\python.exe" -m pip install --upgrade pyinstaller
+echo [3/3] Installing build dependencies from pyproject.toml...
+".venv-build\Scripts\python.exe" -m pip install -e ".[exe]"
 if errorlevel 1 goto failed
 
 ".venv-build\Scripts\python.exe" -m PyInstaller --version

@@ -1,0 +1,1 @@
+"""ClipboardTyper core package."""

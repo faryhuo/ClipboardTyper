@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clipboard-typer"
+version = "0.1.0"
+description = "Windows clipboard typing utility with global hotkeys and a settings GUI"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Desktop Environment",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<9", "ruff>=0.11,<1", "build>=1.2,<2"]
+exe = ["pyinstaller>=6,<7; sys_platform == 'win32'"]
+
+[project.scripts]
+clipboard-typer = "clipboard_typer.cli:main"
+
+[project.gui-scripts]
+clipboard-typer-gui = "clipboard_typer.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+markers = ["integration: integration tests, including Windows/Tk regression scenarios"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+

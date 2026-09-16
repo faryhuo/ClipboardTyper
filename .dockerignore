@@ -1,12 +1,11 @@
+.git/
+.svn/
 .venv*/
-build/
-dist/
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
-.coverage
-htmlcov/
+build/
+dist/
 *.log*
-.env

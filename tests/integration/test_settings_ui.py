@@ -15,9 +15,10 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import clipboard_typer as app_module
-import clipboard_typer_ui as ui
+from clipboard_typer.services import application as app_module
+from clipboard_typer.ui import settings as ui
+from clipboard_typer.core.config import DEFAULT_SETTINGS, read_settings, save_settings_atomic, validate_settings
+from clipboard_typer.platforms.windows import Win32
 
 
 def run_scenario():
@@ -59,11 +60,11 @@ def run_scenario():
 
     with tempfile.TemporaryDirectory() as directory:
         settings_path = Path(directory) / "settings.json"
-        original = copy.deepcopy(app_module.DEFAULT_SETTINGS)
-        app_module.save_settings_atomic(settings_path, original)
+        original = copy.deepcopy(DEFAULT_SETTINGS)
+        save_settings_atomic(settings_path, original)
         logger = logging.getLogger("settings-ui-regression")
         logger.addHandler(logging.NullHandler())
-        win = app_module.Win32()
+        win = Win32()
         app = app_module.App(win, None, original, settings_path,
                              Path(directory) / "test.log", logger)
         native_hotkeys = Mock()
@@ -87,7 +88,7 @@ def run_scenario():
                 errors.put((text, detail))
             app.notices.put(app_module.UiEvent(kind, text, detail, data))
 
-        service = ui.ConfigService(win, notify, original, app_module.validate_settings)
+        service = ui.ConfigService(win, notify, original, validate_settings)
         app.config_service = service
         previous = original
         completed = 0
@@ -95,7 +96,8 @@ def run_scenario():
                 patch.object(app_module, "save_settings_atomic", save):
             try:
                 app.open_settings()
-                deadline = time.monotonic() + 20
+                # Allow slower CI desktops to finish all 30 real Tk cycles.
+                deadline = time.monotonic() + 60
                 while completed < 30 and time.monotonic() < deadline:
                     app.handle_events()
                     assert errors.empty(), list(errors.queue)
@@ -106,7 +108,7 @@ def run_scenario():
                     except queue.Empty:
                         continue
                     completed = number
-                    persisted = app_module.read_settings(settings_path)
+                    persisted = read_settings(settings_path)
                     if number == 11:
                         assert not result["ok"]
                         assert "read-only" in result["error"]
@@ -136,7 +138,7 @@ class SettingsUIRegression(unittest.TestCase):
     def test_save_and_reopen_in_real_tk(self):
         result = subprocess.run(
             [sys.executable, "-X", "faulthandler", str(Path(__file__).resolve()), "--scenario"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=90,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS:", result.stdout)

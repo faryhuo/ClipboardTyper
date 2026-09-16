@@ -82,7 +82,7 @@ Citrix 支持的是本地 Windows 会话客户端识别和专用输入速度；�
 ## 在 Windows 上生成 EXE
 
 1. 安装 Windows Python 3.9 或以上版本，确保 `py` 或 `python` 命令可用。
-2. 完整解压本包。保留 `clipboard_typer.py`、`clipboard_typer_ui.py`、`settings.json`、`install_pyinstaller.bat` 和 `build_exe.bat` 在同一目录。
+2. 完整解压项目，保留 `src/`、`scripts/`、`pyproject.toml`、`settings.json` 和两个构建 BAT 文件的目录结构。
 3. 先右键退出正在运行的旧程序，再双击 `build_exe.bat`。
 4. 成功后运行 `dist\ClipboardTyper.exe`。同目录会有 `settings.json`，可一起复制到其他电脑。
 
@@ -90,7 +90,7 @@ Citrix 支持的是本地 Windows 会话客户端识别和专用输入速度；�
 
 重打包时会保留已有的 `dist\settings.json`，不会覆盖你的自定义参数。首次生成时从项目目录复制配置。**运行 EXE 时，请编辑 `dist` 内、EXE 旁的配置**，或直接使用托盘的「编辑配置」，避免改错文件。
 
-本次升级涉及代码，需要重新打包一次；以后只调整配置，无需再打包。也可执行 `py -3 clipboard_typer.py` 直接运行源代码。
+本次升级涉及代码，需要重新打包一次；以后只调整配置，无需再打包。也可执行 `python -m clipboard_typer`（先执行 `python -m pip install -e .`） 直接运行源代码。
 
 ## 默认快捷键和托盘操作
 
@@ -145,7 +145,7 @@ Citrix 支持的是本地 Windows 会话客户端识别和专用输入速度；�
 }
 ```
 
-配置优先从 EXE 或 Python 脚本所在目录读取，不依赖启动时的工作目录。配置不存在时会生成默认文件；该目录无法写入时，改用 `%LOCALAPPDATA%\ClipboardTyper\settings.json`。托盘「编辑 JSON 配置（高级）」始终打开实际使用的文件。启动时配置损坏会显示常驻错误并暂用默认值，不覆盖损坏文件，修正后可重新加载。
+EXE 从自身目录读取配置，源码/可编辑安装从项目根目录读取；普通包安装使用用户数据目录，不依赖启动时的工作目录。可通过 `clipboard-typer run --config PATH` 或 `CLIPBOARD_TYPER_CONFIG` 指定文件。配置不存在时会生成默认文件；该目录无法写入时，改用 `%LOCALAPPDATA%\ClipboardTyper\settings.json`。托盘「编辑 JSON 配置（高级）」始终打开实际使用的文件。启动时配置损坏会显示常驻错误并暂用默认值，不覆盖损坏文件，修正后可重新加载。
 
 ### 速度参数
 
@@ -216,10 +216,12 @@ Citrix 支持的是本地 Windows 会话客户端识别和专用输入速度；�
 - **设置似乎没变化**：确认编辑了正在运行的 EXE 旁配置，保存后选择「重新加载配置」。速度在下一次新任务生效，暂停任务继续使用旧速度。
 - **重复启动**：新实例会通知旧实例退出再接管快捷键。Explorer 重启后会尝试恢复托盘图标。
 
-## 验证范围
+## 历史功能验证记录
+
+以下记录来自架构迁移前的版本；当前测试命令与验证边界见 [开发说明](development.md)。
 
 56 项独立回归检查通过，使用模拟 Windows 调用及真实 Tcl 表单变量。新增 14 项覆盖阻塞写入时监听仍可响应、事务回滚、保存期间退出、后台日志和异常堆栈、Citrix 旧配置兼容及关闭开关、录制与退出快捷键冲突、按键重复和释放、注入按键、非法单字母、录制取消及过期结果、Esc 窗口范围、全局中止、卡片绘制失败日志及恢复。原有检查继续覆盖分块发送、Unicode、暂停恢复、进度、配置、原生资源释放和多屏 DPI。另检查 Python 3.9 语法兼容性、Windows 结构布局和下载包内容。
 
-保存崩溃修复已在 Windows 的真实 Tk 窗口中回归验证：29 次成功保存、1 次模拟写入失败及回滚、非法输入校验、关闭后重开和 UI 线程退出。运行 `.venv-build\Scripts\python.exe -m unittest discover -s tests -v` 可重跑；测试使用临时配置，不注册全局快捷键。
+保存崩溃修复已在 Windows 的真实 Tk 窗口中回归验证：29 次成功保存、1 次模拟写入失败及回滚、非法输入校验、关闭后重开和 UI 线程退出。运行 `python -m pytest tests/integration/test_settings_ui.py -v` 可重跑；测试使用临时配置，不注册全局快捷键。
 
 此前的完整验证环境为 Linux；本次 Windows 回归针对设置保存流程。实际 RDP / Citrix 转发、快捷键录制、混合 DPI 和显示器热插拔仍需单独验证。

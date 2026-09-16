@@ -4,8 +4,9 @@ title Build ClipboardTyper EXE
 pushd "%~dp0"
 if errorlevel 1 goto directory_error
 
-if not exist "clipboard_typer.py" goto missing_source
-if not exist "clipboard_typer_ui.py" goto missing_ui
+if not exist "src\clipboard_typer\gui.py" goto missing_source
+if not exist "scripts\run_gui.py" goto missing_source
+if not exist "pyproject.toml" goto missing_source
 if not exist "install_pyinstaller.bat" goto missing_installer
 if not exist "settings.json" goto missing_settings
 
@@ -33,7 +34,8 @@ if errorlevel 1 goto failed
     --distpath "dist" ^
     --workpath "build" ^
     --specpath "build" ^
-    "clipboard_typer.py"
+    --paths "src" ^
+    "scripts\run_gui.py"
 
 if errorlevel 1 goto failed
 if not exist "dist\ClipboardTyper.exe" goto failed
@@ -57,11 +59,7 @@ pause
 exit /b 0
 
 :missing_source
-echo ERROR: Put clipboard_typer.py in the same folder as build_exe.bat.
-goto failed
-
-:missing_ui
-echo ERROR: Put clipboard_typer_ui.py in the same folder as build_exe.bat.
+echo ERROR: Keep src, scripts and pyproject.toml beside build_exe.bat.
 goto failed
 
 :missing_tk
