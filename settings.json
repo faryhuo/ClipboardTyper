@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "profiles": {
+    "slow": {
+      "keyDelay": 10,
+      "chunk": 1,
+      "pause": 50,
+      "breatherEvery": 10,
+      "breatherPause": 400,
+      "linePause": 400
+    },
+    "fast": {
+      "keyDelay": 0,
+      "chunk": 12,
+      "pause": 15,
+      "breatherEvery": 8,
+      "breatherPause": 80,
+      "linePause": 120
+    }
+  },
+  "remote_desktop": {
+    "enabled": true,
+    "executables": [
+      "mstsc.exe",
+      "msrdc.exe"
+    ],
+    "citrix_enabled": true,
+    "citrix_executables": [
+      "wfica32.exe",
+      "cdviewer.exe",
+      "citrix.desktopviewer.app.exe"
+    ],
+    "profiles": {
+      "slow": {
+        "keyDelay": 10,
+        "chunk": 1,
+        "pause": 50,
+        "breatherEvery": 10,
+        "breatherPause": 400,
+        "linePause": 400
+      },
+      "fast": {
+        "keyDelay": 0,
+        "chunk": 4,
+        "pause": 35,
+        "breatherEvery": 8,
+        "breatherPause": 160,
+        "linePause": 250
+      }
+    }
+  },
+  "hotkeys": {
+    "slow": "Ctrl+J",
+    "fast": "Ctrl+K",
+    "pause_resume": "F8",
+    "stop": "Ctrl+Alt+S",
+    "quit": "Ctrl+Alt+Q"
+  },
+  "options": {
+    "stop_on_focus_loss": true,
+    "pause_on_focus_loss": true,
+    "clear_auto_indent": true,
+    "pause_on_modifiers": true,
+    "start_delay_ms": 200,
+    "show_popup": true,
+    "show_progress": true,
+    "progress_interval_ms": 250,
+    "notice_duration_ms": 4000
+  }
+}
