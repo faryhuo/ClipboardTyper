@@ -1,5 +1,7 @@
 # ClipboardTyper
 
+![ClipboardTyper 设置界面](docs/images/settings.png)
+
 Windows 剪贴板模拟输入工具：通过全局快捷键逐字或分块输入文本，提供暂停/继续、焦点保护、远程桌面专用速度、托盘和图形设置。运行代码只依赖 Python 标准库。
 
 ## 安装与运行

@@ -28,6 +28,9 @@ clipboard-typer-gui = "clipboard_typer.gui:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+clipboard_typer = ["assets/*.png", "assets/*.ico", "assets/*.svg"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--import-mode=importlib"
@@ -39,4 +42,3 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
-

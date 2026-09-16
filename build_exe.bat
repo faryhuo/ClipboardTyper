@@ -31,6 +31,8 @@ if errorlevel 1 goto failed
     --windowed ^
     --noupx ^
     --name "ClipboardTyper" ^
+    --icon "%~dp0src\clipboard_typer\assets\clipboard-typer.ico" ^
+    --collect-data "clipboard_typer" ^
     --distpath "dist" ^
     --workpath "build" ^
     --specpath "build" ^

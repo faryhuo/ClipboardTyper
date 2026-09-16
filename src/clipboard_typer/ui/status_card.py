@@ -3,6 +3,7 @@ from contextlib import contextmanager
 import ctypes as C
 import time
 import traceback
+from clipboard_typer.ui.branding import BLUE, INK, LOGO_RECTS
 
 
 UINT = DWORD = C.c_uint32
@@ -65,7 +66,7 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8"):
     """Shared logical layout for Windows painting and deterministic layout checks."""
     snapshot = snapshot or {}
     state = snapshot.get("state", "就绪")
-    accent, tint = "#4169E1", "#EEF3FF"
+    accent, tint = BLUE, "#EAF1FF"
     if error:
         title, badge, accent, tint = "需要处理", "错误", "#D14C57", "#FFF0F1"
     elif "暂停" in state or "等待松开" in state:
@@ -87,12 +88,12 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8"):
     ops = [
         ("round", (0, 0, 380, 190), "#E0E6F0", 18),
         ("round", (1, 1, 379, 189), "#FFFFFF", 17),
-        ("round", (18, 16, 48, 46), tint, 10),
-        ("text", (18, 18, 48, 44), "C", accent, 17, True, "center"),
+        *[("round", (18+a*.5, 15+b*.5, 18+c*.5, 15+d*.5), color, radius*.5)
+          for a, b, c, d, radius, color in LOGO_RECTS],
         ("text", (58, 17, 244, 44), "ClipboardTyper · Citrix" if snapshot.get("profile_name") == "Citrix Workspace" else "ClipboardTyper · RDP" if snapshot.get("profile_name") == "远程桌面" else "ClipboardTyper", "#546178", 12, True, "left"),
         ("text", (302, 13, 330, 44), "···", "#68768C", 18, True, "center"),
         ("text", (342, 14, 367, 43), "×", "#8793A5", 18, False, "center"),
-        ("text", (20, 56, 210, 88), title, "#162238", 23, True, "left"),
+        ("text", (20, 56, 210, 88), title, INK, 23, True, "left"),
         ("round", (302, 61, 360, 84), tint, 9),
         ("text", (302, 61, 360, 83), badge, accent, 11, True, "center"),
         ("text", (20, 96, 280 if progress else 360, 119 if progress else 143),

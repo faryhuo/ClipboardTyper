@@ -4,6 +4,8 @@ import time
 import traceback
 from clipboard_typer.core.events import UiEvent
 from clipboard_typer.platforms.windows import NOTIFYICONDATAW, POINT, WM_HOTKEY, WNDCLASSW
+from clipboard_typer.ui.branding import ASSETS
+from clipboard_typer.ui.status_card import bind
 
 
 class TrayIcon:
@@ -19,6 +21,7 @@ class TrayIcon:
         self.class_registered, self.added, self.version4 = False, False, False
         self.in_menu, self.next_retry, self.taskbar_created = False, 0, 0
         self.last_tip = None
+        self.owned_icon = None
         self.data = NOTIFYICONDATAW()
         self.data.cbSize = C.sizeof(self.data)
 
@@ -41,7 +44,10 @@ class TrayIcon:
             raise C.WinError(C.get_last_error())
         self.data.hWnd, self.data.uID = self.hwnd, 1
         self.data.uCallbackMessage = self.CALLBACK_MESSAGE
-        self.data.hIcon = (w.LoadIconW(self.module, C.c_void_p(1))
+        load_image = bind(w.user, "LoadImageW", C.c_void_p, C.c_void_p, C.c_wchar_p,
+                          C.c_uint, C.c_int, C.c_int, C.c_uint)
+        self.owned_icon = load_image(None, str(ASSETS / "clipboard-typer.ico"), 1, 0, 0, 0x10 | 0x40)
+        self.data.hIcon = (self.owned_icon or w.LoadIconW(self.module, C.c_void_p(1))
                            or w.LoadIconW(None, C.c_void_p(32512)))
         if not self.data.hIcon:
             raise C.WinError(C.get_last_error())
@@ -181,6 +187,9 @@ class TrayIcon:
         if self.added:
             self.win.Shell_NotifyIconW(2, C.byref(self.data))
             self.added = False
+        if self.owned_icon:
+            bind(self.win.user, "DestroyIcon", C.c_int, C.c_void_p)(self.owned_icon)
+            self.owned_icon = None
         if self.hwnd:
             self.win.DestroyWindow(self.hwnd)
             self.hwnd = None
