@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ['**']
   pull_request:
   workflow_dispatch:
 
@@ -9,6 +10,51 @@ permissions:
   contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.version.outputs.changed }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Detect version change on the default branch
+        id: version
+        shell: python
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import tomllib
+
+          version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']
+          tag = f'v{version}'
+          subprocess.run(['git', 'check-ref-format', f'refs/tags/{tag}'], check=True)
+          changed = False
+          if os.environ['EVENT_NAME'] == 'push' and os.environ['GITHUB_REF'] == os.environ['DEFAULT_REF']:
+              before = os.environ['BEFORE_SHA']
+              previous = None
+              if before and before != '0' * 40:
+                  # A force-pushed previous tip may be absent from the current history.
+                  if subprocess.run(['git', 'cat-file', '-e', before]).returncode:
+                      subprocess.run(['git', 'fetch', 'origin', before], check=True)
+                  files = subprocess.check_output(['git', 'ls-tree', '--name-only', before, 'pyproject.toml'], text=True)
+                  if files.strip():
+                      metadata = subprocess.check_output(['git', 'show', f'{before}:pyproject.toml'], text=True, encoding='utf-8')
+                      previous = tomllib.loads(metadata)['project']['version']
+              changed = version != previous
+              print(f'Project version: {previous} -> {version}; release: {changed}')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'changed={str(changed).lower()}\ntag={tag}\n')
+
   test:
     strategy:
       fail-fast: false
@@ -46,8 +92,11 @@ jobs:
           if-no-files-found: error
 
   windows-exe:
-    needs: test
+    needs: [test, version]
+    if: needs.version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    env:
+      PYTHONUTF8: '1'
     strategy:
       matrix:
         include:
@@ -63,10 +112,48 @@ jobs:
         with:
           python-version: '3.13'
       - name: Build desktop executable
-        shell: cmd
-        run: build_exe.bat --${{ matrix.mode }} --no-pause
+        shell: pwsh
+        run: |
+          python -m venv .venv-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .venv-build/Scripts/python.exe scripts/build_exe.py --mode ${{ matrix.mode }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.output }}
           if-no-files-found: error
+
+  release:
+    needs: [version, windows-exe]
+    if: needs.version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ needs.version.outputs.tag }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClipboardTyper-windows
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: ClipboardTyper-windows-onedir
+          path: onedir/ClipboardTyper
+      - name: Archive the portable directory build
+        working-directory: onedir
+        run: zip -r ../release/ClipboardTyper-windows-onedir.zip ClipboardTyper
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ClipboardTyper ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          files: |
+            release/ClipboardTyper.exe
+            release/settings.json
+            release/ClipboardTyper-windows-onedir.zip

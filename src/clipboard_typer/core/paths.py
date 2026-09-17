@@ -17,7 +17,8 @@ def application_paths(settings_path=None):
     data_dir.mkdir(parents=True, exist_ok=True)
     override = settings_path if settings_path is not None else os.environ.get("CLIPBOARD_TYPER_CONFIG")
     if override is not None:
-        selected = Path(override).expanduser().resolve()
+        # Python 3.9 on Windows may leave a nonexistent relative path unresolved.
+        selected = Path(override).expanduser().absolute().resolve()
     else:
         source_root = Path(__file__).resolve().parents[3]
         if getattr(sys, "frozen", False):

@@ -35,7 +35,11 @@ Windows 下双击 `build_exe.bat`。BAT 负责选择 Python 和创建 `.venv-bui
 
 单文件版输出 `dist/ClipboardTyper.exe`；目录版输出 `dist/ClipboardTyper/ClipboardTyper.exe`，必须连同 `_internal` 和 `settings.json` 分发整个目录。两种模式保留各自 EXE 旁的配置，新建配置从项目根目录复制，不自动同步两个模式的配置。目录版先在 `build/onedir/staging` 构建，再覆盖复制程序文件，避免 PyInstaller 清空用户配置；输出目录中额外添加的文件也会保留。
 
-CI 对 Windows/Linux、Python 3.9/3.13 运行 Ruff、Pytest、wheel 和源码包构建，并在安装 wheel 后从临时目录检查命令入口；独立 Windows 任务分别生成单文件版和目录版，上传构建产物供下载。CI 不自动发布到 PyPI 或部署。
+CI 对 Windows/Linux、Python 3.9/3.13 运行 Ruff、Pytest、wheel 和源码包构建，并在安装 wheel 后从临时目录检查命令入口。
+
+发布时修改 `pyproject.toml` 中的 `[project].version`，提交并 push 到仓库默认分支。CI 比较本次 push 前后的版本号（包括一次 push 多个提交的情况）；版本变化且全部测试通过后，使用 Python 3.13 构建 Windows 单文件版和目录版，自动创建 `v<version>` 标签及 GitHub Release，附上 `ClipboardTyper.exe`、`settings.json` 和包含完整依赖的 `ClipboardTyper-windows-onedir.zip`。例如 `0.1.0` 改为 `0.2.0` 会发布 `v0.2.0`，无需手动打标签。发布失败后可重新运行原 workflow；已有附件不会被覆盖，新的版本应使用新的版本号。
+
+版本不变、其他分支 push 和 PR 只运行检查，不发布。手动运行 workflow 会额外构建 EXE 并上传 Actions 产物，但不创建 Release。发布任务使用 GitHub 自动提供的 `GITHUB_TOKEN` 和任务级 `contents: write` 权限，无需额外配置个人令牌。
 
 ## 从旧布局迁移
 
