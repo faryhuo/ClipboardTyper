@@ -196,8 +196,14 @@ class TypingJob:
     def run(self):
         result, kind, detail = "", "notice", ""
         try:
+            if self.physical.modifiers_down() or self.physical.down(self.trigger):
+                with self.control:
+                    self._state = "等待松开快捷键"
+                self.publish("准备输入：请松开快捷键及 Ctrl / Alt / Shift / Win")
             while self.physical.modifiers_down() or self.physical.down(self.trigger):
                 self.nap(10)
+            with self.control:
+                self._state = "准备输入"
             self.nap(self.options["start_delay_ms"])
             text = self.read_clipboard()
             if not text:

@@ -48,6 +48,15 @@ jobs:
   windows-exe:
     needs: test
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - mode: onefile
+            artifact: ClipboardTyper-windows
+            output: dist
+          - mode: onedir
+            artifact: ClipboardTyper-windows-onedir
+            output: dist/ClipboardTyper
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,11 +64,9 @@ jobs:
           python-version: '3.13'
       - name: Build desktop executable
         shell: cmd
-        run: build_exe.bat --no-pause
+        run: build_exe.bat --${{ matrix.mode }} --no-pause
       - uses: actions/upload-artifact@v4
         with:
-          name: ClipboardTyper-windows
-          path: |
-            dist/ClipboardTyper.exe
-            dist/settings.json
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.output }}
           if-no-files-found: error

@@ -45,6 +45,8 @@ Citrix 支持的是本地 Windows 会话客户端识别和专用输入速度；�
 
 快捷键不变：Ctrl+J 使用所选方案的慢速，Ctrl+K 使用快速。方案及参数在任务开始时固定，暂停后更改配置不会改变当前任务。
 
+任务暂停时按 Ctrl+J 或 Ctrl+K，会先中止旧任务，等旧输入线程退出，再从当前剪贴板开始一个慢速或快速新任务，进度从零计算。新任务使用当前输入窗口和最新配置；如需接着旧任务输入，请按 F8。等待松开快捷键、正在中止任务、设置窗口未关闭等情况会在状态卡片和托盘显示提示；若在任务交接期间切换窗口，本次新任务取消，点击目标位置后重新按快捷键即可。
+
 旧配置文件可继续使用：未填写 `remote_desktop` 时补充默认值，已有通用参数保留。用 GUI 保存后新字段写入原文件。重打包仍不覆盖已有的 `dist/settings.json`。
 
 ### 焦点移开后能否继续输入原窗口？
@@ -82,11 +84,15 @@ Citrix 支持的是本地 Windows 会话客户端识别和专用输入速度；�
 ## 在 Windows 上生成 EXE
 
 1. 安装 Windows Python 3.9 或以上版本，确保 `py` 或 `python` 命令可用。
-2. 完整解压项目，保留 `src/`、`scripts/`、`pyproject.toml`、`settings.json` 和两个构建 BAT 文件的目录结构。
+2. 完整解压项目，保留 `src/`、`scripts/`、`pyproject.toml`、`settings.json` 和 `build_exe.bat` 的目录结构。
 3. 先右键退出正在运行的旧程序，再双击 `build_exe.bat`。
 4. 成功后运行 `dist\ClipboardTyper.exe`。同目录会有 `settings.json`，可一起复制到其他电脑。
 
-首次打包需要联网安装 PyInstaller。脚本将打包工具放入项目的 `.venv-build`，无需全局安装 PyInstaller；单独双击 `install_pyinstaller.bat` 也可准备打包环境。
+首次打包需要联网安装 PyInstaller。`build_exe.bat` 自动创建或复用项目的 `.venv-build` 并安装打包依赖，无需全局安装 PyInstaller，也无需单独运行安装脚本。
+
+重复打包会复用构建缓存；项目元数据、Python 和已安装包版本未变化时跳过依赖安装。需要重新分析时使用 `build_exe.bat --clean`，需要重新安装依赖时使用 `build_exe.bat --refresh-deps`。可组合参数，自动化运行时添加 `--no-pause`。
+
+如果更重视启动速度，执行 `build_exe.bat --onedir`，然后运行 `dist\ClipboardTyper\ClipboardTyper.exe`。目录版减少单文件版每次启动的解压开销；**必须复制整个 `dist\ClipboardTyper` 文件夹**，包含 `_internal`，不能只复制 EXE。目录版配置位于 `dist\ClipboardTyper\settings.json`，重打包同样保留；首次从项目根目录复制，不自动沿用单文件版配置。单文件版仍为默认，也可显式使用 `--onefile`。
 
 重打包时会保留已有的 `dist\settings.json`，不会覆盖你的自定义参数。首次生成时从项目目录复制配置。**运行 EXE 时，请编辑 `dist` 内、EXE 旁的配置**，或直接使用托盘的「编辑配置」，避免改错文件。
 

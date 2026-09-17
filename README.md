@@ -28,6 +28,8 @@ clipboard-typer validate-config settings.json
 
 先复制文本，再点击目标输入位置。默认 `Ctrl+J` 慢速、`Ctrl+K` 快速、`F8` 暂停/继续、`Ctrl+Alt+S` 中止、`Ctrl+Alt+Q` 退出。双击托盘图标打开设置。
 
+任务暂停时，`Ctrl+J` / `Ctrl+K` 会结束旧任务，重新读取当前剪贴板并开始慢速 / 快速新任务；`F8` 继续旧任务。等待松开快捷键、设置窗口未关闭或任务尚未结束时，状态卡片和托盘会提示原因。
+
 ## 项目结构
 
 ```text
@@ -46,7 +48,9 @@ ClipboardTyper/
 │   ├── ui/                 # 状态卡片、Tk 设置、托盘
 │   ├── cli.py              # argparse 命令行入口
 │   └── gui.py              # 桌面启动入口
-├── scripts/run_gui.py      # PyInstaller 启动脚本
+├── scripts/
+│   ├── build_exe.py        # 依赖缓存与两种 EXE 打包模式
+│   └── run_gui.py          # PyInstaller 启动脚本
 ├── tests/
 │   ├── conftest.py
 │   ├── unit/
@@ -54,7 +58,6 @@ ClipboardTyper/
 ├── .dockerignore
 ├── .gitignore
 ├── build_exe.bat
-├── install_pyinstaller.bat
 ├── settings.json
 ├── README.md
 └── pyproject.toml
@@ -83,5 +86,7 @@ ClipboardTyper/
 ```
 
 `build` 生成 wheel 和源码包；`build_exe.bat` 创建独立的 `.venv-build` 并生成 `dist\ClipboardTyper.exe`。最终用户无需安装 Python。GitHub Actions 执行 Windows/Linux 检查、测试和 Python 包构建，并生成 Windows EXE 构建产物。
+
+重复打包默认跳过未变化的依赖安装并复用构建缓存。使用 `build_exe.bat --onedir` 生成启动更快的目录版 `dist\ClipboardTyper\ClipboardTyper.exe`，分发时复制整个 `ClipboardTyper` 文件夹。`--clean` 强制重新分析，`--refresh-deps` 强制重新安装依赖；两种模式均保留各自 EXE 旁已有的配置。
 
 详见 [架构说明](docs/architecture.md) 与 [开发说明](docs/development.md)。

@@ -25,6 +25,7 @@ class App:
         self.settings_path, self.log_path, self.logger = Path(settings_path), Path(log_path), logger
         self.shutdown, self.physical = threading.Event(), PhysicalKeys()
         self.job, self.worker, self.reload_worker = None, None, None
+        self.pending_start = None
         self.save_worker, self.pending_settings = None, None
         self.exit_after_save = False
         self.recording, self.record_swallowed = None, set()
@@ -41,6 +42,7 @@ class App:
         return self.worker is not None and self.worker.is_alive()
 
     def stop(self):
+        self.pending_start = None
         if self.job:
             self.job.cancel()
 
@@ -158,8 +160,25 @@ class App:
         return self.win.CallNextHookEx(self.hook, code, message, pointer)
 
     def start(self, mode):
-        if self.busy() or self.shutdown.is_set() or self.config_open or self.exit_after_save:
+        if self.shutdown.is_set() or self.exit_after_save:
+            self.notices.put("程序正在退出，无法开始新任务")
             return
+        if self.config_open:
+            self.notices.put("请先关闭设置窗口，再回到原输入位置使用快捷键")
+            return
+        if self.busy():
+            if self.job and self.job.abort.is_set():
+                self.notices.put("正在中止当前任务，请稍后重试")
+            elif self.job and self.job.is_paused():
+                foreground = self.win.GetForegroundWindow()
+                self.stop()
+                self.pending_start = (mode, foreground)
+                self.notices.put("正在结束暂停的任务，随后从当前剪贴板开始新任务")
+            else:
+                self.notices.put("当前任务正在输入；" + self.shortcut("pause_resume")
+                                 + " 暂停/继续；如需新任务，请先按 " + self.shortcut("stop") + " 中止")
+            return
+        self.pending_start = None
         foreground = self.win.GetForegroundWindow()
         target = foreground if self.settings["options"]["stop_on_focus_loss"] else None
         if self.settings["options"]["stop_on_focus_loss"] and not target:
@@ -177,8 +196,19 @@ class App:
                              self.physical, self.shortcut)
         self.job.profile_name = profile_name
         self.job.origin_hwnd = foreground
+        self.job.publish("准备" + self.job.label + "输入：松开快捷键后读取当前剪贴板")
         self.worker = threading.Thread(target=self.job.run, name="clipboard-typing", daemon=True)
         self.worker.start()
+
+    def start_pending(self):
+        if self.pending_start is None or self.busy():
+            return
+        mode, foreground = self.pending_start
+        self.pending_start = None
+        if self.win.GetForegroundWindow() != foreground:
+            self.notices.put("目标窗口已切换，请点击输入位置后重新按快捷键")
+            return
+        self.start(mode)
 
     def on_hotkey(self, hotkey_id):
         if not self.hotkeys or self.shutdown.is_set() or self.recording or self.record_swallowed:
@@ -414,6 +444,10 @@ class App:
 
     def wait_timeout(self):
         deadlines = []
+        if self.pending_start is not None:
+            # The finished event can arrive just before the worker thread exits.
+            # Retry only while handing off a replacement, without blocking hooks.
+            deadlines.append(time.monotonic() + 0.01)
         if self.flash and self.flash.deadline:
             deadlines.append(self.flash.deadline)
         if self.tray and not self.tray.added:
@@ -458,6 +492,7 @@ class App:
                     if not self.exit_after_save and self.instance.replacement_requested():
                         self.quit()
                     self.handle_events()
+                    self.start_pending()
                     self.flash.tick()
                     self.tray.tick()
                     if not self.shutdown.is_set():
