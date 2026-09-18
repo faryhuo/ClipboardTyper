@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clipboard-typer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Windows clipboard typing utility with global hotkeys and a settings GUI"
 readme = "README.md"
 requires-python = ">=3.9"

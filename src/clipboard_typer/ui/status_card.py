@@ -62,7 +62,67 @@ def rgb(value):
     return r | (g << 8) | (b << 16)
 
 
-def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False):
+ACTIVE_STATES = ("正在输入", "准备输入")
+
+
+def anime_sprite_ops(animation_frame):
+    """Return a tiny animated cat-eared helper drawn with GDI primitives."""
+    frame = int(animation_frame) % 48
+    bob = (0, -1, -2, -1, 0, 1, 2, 1)[frame % 8]
+    blink = frame % 24 in (22, 23)
+    wave = -2 if frame % 8 < 4 else 1
+    hair, hair_dark, skin = "#5D7DEA", "#405FBF", "#FFE2D4"
+    mint, pink = "#78E2CA", "#F3A8B8"
+
+    # The star positions alternate independently from the character's bob.
+    star_a = -1 if frame % 6 < 3 else 1
+    star_b = 1 if frame % 10 < 5 else -1
+    ops = [
+        ("poly", ((229, 58 + star_a), (232, 61 + star_a), (229, 64 + star_a),
+                  (226, 61 + star_a)), mint),
+        ("poly", ((292, 69 + star_b), (294, 71 + star_b), (292, 73 + star_b),
+                  (290, 71 + star_b)), "#9AB0F5"),
+        # Twin tails, ears and body sit behind the face.
+        ("ellipse", (236, 67 + bob, 250, 83 + bob), hair_dark),
+        ("ellipse", (278, 67 + bob, 292, 83 + bob), hair_dark),
+        ("round", (257, 82 + bob, 271, 96 + bob), hair_dark, 6),
+        ("poly", ((248, 62 + bob), (251, 49 + bob), (259, 60 + bob)), hair_dark),
+        ("poly", ((269, 60 + bob), (277, 49 + bob), (280, 63 + bob)), hair_dark),
+        ("poly", ((251, 59 + bob), (253, 53 + bob), (257, 60 + bob)), pink),
+        ("poly", ((272, 59 + bob), (276, 53 + bob), (277, 61 + bob)), pink),
+        ("ellipse", (246, 54 + bob, 282, 87 + bob), hair),
+        ("ellipse", (250, 60 + bob, 278, 86 + bob), skin),
+        # Soft bangs make the code-drawn mascot read as an anime character.
+        ("ellipse", (247, 54 + bob, 262, 68 + bob), hair),
+        ("ellipse", (257, 53 + bob, 270, 67 + bob), hair),
+        ("ellipse", (267, 54 + bob, 281, 68 + bob), hair),
+        ("round", (252, 75 + bob, 256, 77 + bob), pink, 1),
+        ("round", (272, 75 + bob, 276, 77 + bob), pink, 1),
+    ]
+    if blink:
+        ops.extend([
+            ("round", (256, 71 + bob, 261, 72 + bob), hair_dark, .5),
+            ("round", (268, 71 + bob, 273, 72 + bob), hair_dark, .5),
+        ])
+    else:
+        ops.extend([
+            ("ellipse", (257, 69 + bob, 261, 75 + bob), hair_dark),
+            ("ellipse", (268, 69 + bob, 272, 75 + bob), hair_dark),
+            ("ellipse", (258, 70 + bob, 260, 72 + bob), "#FFFFFF"),
+            ("ellipse", (269, 70 + bob, 271, 72 + bob), "#FFFFFF"),
+        ])
+    ops.extend([
+        ("round", (263, 78 + bob, 266, 80 + bob), "#C96F82", 1),
+        ("poly", ((260, 87 + bob), (264, 91 + bob), (268, 87 + bob),
+                  (264, 85 + bob)), mint),
+        ("round", (251, 87 + bob + wave, 258, 90 + bob + wave), skin, 1.5),
+        ("round", (270, 88 + bob - wave, 277, 91 + bob - wave), skin, 1.5),
+    ])
+    return ops
+
+
+def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False,
+               animation_frame=0):
     """Shared logical layout for Windows painting and deterministic layout checks."""
     snapshot = snapshot or {}
     state = snapshot.get("state", "就绪")
@@ -75,7 +135,7 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False
         title, badge, accent, tint = "输入已暂停", snapshot.get("label", "暂停"), "#B77B19", "#FFF7E7"
     elif state == "已完成":
         title, badge, accent, tint = "输入完成", snapshot.get("label", "完成"), "#168569", "#EAF8F2"
-    elif state in ("正在输入", "准备输入"):
+    elif state in ACTIVE_STATES:
         title, badge = "正在输入" if state == "正在输入" else "准备输入", snapshot.get("label", "输入")
     elif state in ("已中止", "无文本"):
         title, badge, accent, tint = state, "已停止", "#64748B", "#F0F3F7"
@@ -101,13 +161,21 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False
         ("text", (20, 96, 280 if progress else 360, 119 if progress else 143),
          detail, "#65738A", 12, False, "left" if progress else "wrap"),
     ]
+    if state in ACTIVE_STATES and not error and not notice:
+        ops.extend(anime_sprite_ops(animation_frame))
     if progress:
         ops.extend([
             ("text", (279, 94, 360, 120), f"{percent:.1f}%", accent, 16, True, "right"),
             ("round", (20, 130, 360, 136), "#EDF1F7", 3),
         ])
         if percent > 0:
-            ops.append(("round", (20, 130, 20 + max(3, 340 * percent / 100), 136), accent, 3))
+            progress_end = 20 + max(3, 340 * percent / 100)
+            ops.append(("round", (20, 130, progress_end, 136), accent, 3))
+            if state in ACTIVE_STATES and not error and not notice and progress_end > 25:
+                travel = max(1, progress_end - 20)
+                shimmer = 20 + travel * ((int(animation_frame) % 18) / 17)
+                ops.append(("round", (max(20, shimmer - 8), 131,
+                                       min(progress_end, shimmer + 8), 135), "#78E2CA", 2))
         footer = f"第 {snapshot['line']}/{snapshot['lines']} 行  ·  剩余 {snapshot['remaining']:,}"
         hint = f"{pause_key} {'继续' if '暂停' in state or '等待松开' in state else '暂停'}"
         if state in ("已完成", "已中止", "无文本"):
@@ -125,6 +193,8 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False
 class StatusCard:
     CLASS_NAME = "ClipboardTyper.StatusCard.v2"
     RELAYOUT = 0x8000 + 72
+    ANIMATION_TIMER_ID = 7
+    ANIMATION_INTERVAL_MS = 90
 
     def __init__(self, win, enabled=True, menu_callback=None, hide_callback=None, error_callback=None):
         self.win, self.enabled = win, enabled
@@ -133,6 +203,8 @@ class StatusCard:
         self.user_hidden, self.deadline, self.current = False, 0, None
         self.snapshot, self.error, self.pause_key = None, False, "F8"
         self.notice = False
+        self.animation_timer, self.animation_frame = False, 0
+        self.animation_started = 0
         self.hwnd, self.registered = None, False
         self.fonts = {}
         self.region_size = None
@@ -153,6 +225,8 @@ class StatusCard:
         self.CursorPos = bind(u, "GetCursorPos", BOOL, C.c_void_p)
         self.SetCapture = bind(u, "SetCapture", HANDLE, HANDLE)
         self.ReleaseCapture = bind(u, "ReleaseCapture", BOOL)
+        self.SetTimer = bind(u, "SetTimer", C.c_size_t, HANDLE, C.c_size_t, UINT, C.c_void_p)
+        self.KillTimer = bind(u, "KillTimer", BOOL, HANDLE, C.c_size_t)
         self.GetDpiForWindow = optional_bind(u, "GetDpiForWindow", UINT, HANDLE)
         self.DpiContext = optional_bind(u, "SetThreadDpiAwarenessContext", HANDLE, HANDLE)
         self.CreateFont = bind(g, "CreateFontW", HANDLE, *([C.c_int] * 5), *([DWORD] * 8), C.c_wchar_p)
@@ -161,6 +235,8 @@ class StatusCard:
         self.Select = bind(g, "SelectObject", HANDLE, HANDLE, HANDLE)
         self.Delete = bind(g, "DeleteObject", BOOL, HANDLE)
         self.RoundRect = bind(g, "RoundRect", BOOL, HANDLE, *([C.c_int] * 6))
+        self.Ellipse = bind(g, "Ellipse", BOOL, HANDLE, *([C.c_int] * 4))
+        self.Polygon = bind(g, "Polygon", BOOL, HANDLE, C.POINTER(POINT), C.c_int)
         self.CreateRegion = bind(g, "CreateRoundRectRgn", HANDLE, *([C.c_int] * 6))
         self.TextColor = bind(g, "SetTextColor", DWORD, HANDLE, DWORD)
         self.BkMode = bind(g, "SetBkMode", C.c_int, HANDLE, C.c_int)
@@ -338,6 +414,22 @@ class StatusCard:
     def set_context(self, snapshot=None, error=False, pause_key="F8", notice=False):
         self.snapshot, self.error, self.pause_key = snapshot, error, pause_key
         self.notice = notice
+        self.sync_animation_timer()
+
+    def should_animate(self):
+        state = (self.snapshot or {}).get("state")
+        return self.visible and self.is_allowed() and not self.error and not self.notice and state in ACTIVE_STATES
+
+    def sync_animation_timer(self):
+        wanted = bool(self.hwnd and self.should_animate())
+        if wanted and not self.animation_timer:
+            self.animation_started = time.monotonic()
+            self.animation_frame = 0
+            self.animation_timer = bool(self.SetTimer(
+                self.hwnd, self.ANIMATION_TIMER_ID, self.ANIMATION_INTERVAL_MS, None))
+        elif not wanted and self.animation_timer:
+            self.KillTimer(self.hwnd, self.ANIMATION_TIMER_ID)
+            self.animation_timer = False
 
     def is_allowed(self):
         return self.enabled and not self.user_hidden and not self.faulted
@@ -350,6 +442,7 @@ class StatusCard:
         self.fault_detail = traceback.format_exc()
         self.visible, self.deadline, self.drag_origin = False, 0, None
         try:
+            self.sync_animation_timer()
             self.ReleaseCapture()
             if self.hwnd:
                 self.win.ShowWindow(self.hwnd, 0)
@@ -364,6 +457,7 @@ class StatusCard:
             return
         try:
             self.visible = True
+            self.sync_animation_timer()
             self.place(show=True)
             if not self.faulted:
                 self.deadline = 0 if persistent else time.monotonic() + milliseconds / 1000
@@ -374,6 +468,7 @@ class StatusCard:
         self.visible = False
         self.deadline = 0
         try:
+            self.sync_animation_timer()
             self.drag_end()
             if self.hwnd:
                 self.win.ShowWindow(self.hwnd, 0)
@@ -399,6 +494,14 @@ class StatusCard:
 
     def window_proc(self, hwnd, message, wparam, lparam):
         try:
+            if message == 0x0113 and wparam == self.ANIMATION_TIMER_ID:  # WM_TIMER
+                if self.should_animate():
+                    elapsed = time.monotonic() - self.animation_started
+                    self.animation_frame = int(elapsed * 1000 / self.ANIMATION_INTERVAL_MS) % 48
+                    self.InvalidateRect(self.hwnd, None, False)
+                else:
+                    self.sync_animation_timer()
+                return 0
             if message == self.RELAYOUT:
                 self.layout_pending = False
                 if self.visible and self.is_allowed():
@@ -464,15 +567,33 @@ class StatusCard:
             bounds = RECT(0, 0, self.width, self.height)
             self.FillRect(dc, C.byref(bounds), background)
             self.Delete(background)
-            for op in card_scene(self.current or "", self.snapshot, self.error, self.pause_key, self.notice):
-                rect = RECT(*(self.px(n) for n in op[1]))
-                if op[0] == "round":
-                    color, radius = op[2:]
+            for op in card_scene(self.current or "", self.snapshot, self.error, self.pause_key,
+                                 self.notice, self.animation_frame):
+                if op[0] == "poly":
+                    color = op[2]
+                    points = (POINT * len(op[1]))(*(POINT(self.px(x), self.px(y)) for x, y in op[1]))
                     brush, pen = self.Brush(rgb(color)), self.Pen(0, 1, rgb(color))
                     old_brush, old_pen = self.Select(dc, brush), self.Select(dc, pen)
                     try:
-                        self.RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom,
-                                       self.px(radius * 2), self.px(radius * 2))
+                        self.Polygon(dc, points, len(points))
+                    finally:
+                        self.Select(dc, old_brush)
+                        self.Select(dc, old_pen)
+                        self.Delete(brush)
+                        self.Delete(pen)
+                    continue
+                rect = RECT(*(self.px(n) for n in op[1]))
+                if op[0] in ("round", "ellipse"):
+                    color = op[2]
+                    brush, pen = self.Brush(rgb(color)), self.Pen(0, 1, rgb(color))
+                    old_brush, old_pen = self.Select(dc, brush), self.Select(dc, pen)
+                    try:
+                        if op[0] == "ellipse":
+                            self.Ellipse(dc, rect.left, rect.top, rect.right, rect.bottom)
+                        else:
+                            radius = op[3]
+                            self.RoundRect(dc, rect.left, rect.top, rect.right, rect.bottom,
+                                           self.px(radius * 2), self.px(radius * 2))
                     finally:
                         self.Select(dc, old_brush)
                         self.Select(dc, old_pen)
@@ -504,6 +625,9 @@ class StatusCard:
             self.EndPaint(hwnd, C.byref(ps))
 
     def close(self):
+        if self.animation_timer and self.hwnd:
+            self.KillTimer(self.hwnd, self.ANIMATION_TIMER_ID)
+            self.animation_timer = False
         for hook in self.event_hooks:
             self.UnhookWinEvent(hook)
         self.event_hooks.clear()

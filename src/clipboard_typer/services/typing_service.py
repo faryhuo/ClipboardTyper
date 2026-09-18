@@ -1,18 +1,24 @@
 """Clipboard typing jobs, progress and pause/resume behavior."""
+import base64
 import copy
 import ctypes as C
 import threading
 import time
 import traceback
+from pathlib import Path
 from clipboard_typer.core.config import DEFAULT_SETTINGS, parse_hotkey
 from clipboard_typer.core.events import UiEvent
-from clipboard_typer.platforms.windows import KEYUP, VK_DELETE, VK_HOME, VK_RETURN, VK_SHIFT, key_event, key_pair, text_events
+from clipboard_typer.platforms.windows import CF_HDROP, CF_UNICODETEXT, KEYUP, VK_DELETE, VK_HOME, VK_RETURN, VK_SHIFT, key_event, key_pair, text_events
 from clipboard_typer.services.hotkeys import PhysicalKeys
 
 
 # Leave time for the target to translate VK_PACKET before submitting the next
 # character. A whole Unicode block can repeat/drop characters in some clients.
 MIN_KEY_DELAY_MS = 10
+FILE_BEGIN_PREFIX = "<<<CLIPBOARD_TYPER_FILE_BEGIN:"
+FILE_BEGIN_SUFFIX = ">>>"
+FILE_END = "<<<CLIPBOARD_TYPER_FILE_END>>>"
+BASE64_LINE_LENGTH = 76
 
 
 class Cancelled(Exception):
@@ -178,25 +184,63 @@ class TypingJob:
             self.nap(10)
         else:
             raise RuntimeError("无法打开剪贴板，请稍后再试")
+        files, text = None, ""
         try:
-            if not self.win.IsClipboardFormatAvailable(13):
-                return ""
-            handle = self.win.GetClipboardData(13)
-            if not handle:
-                raise C.WinError(C.get_last_error())
-            pointer = self.win.GlobalLock(handle)
-            if not pointer:
-                raise C.WinError(C.get_last_error())
-            try:
-                size = self.win.GlobalSize(handle)
-                if size < 2:
-                    return ""
-                raw = C.string_at(pointer, size - size % 2)
-                return raw.decode("utf-16-le", errors="surrogatepass").split("\0", 1)[0]
-            finally:
-                self.win.GlobalUnlock(handle)
+            if self.win.IsClipboardFormatAvailable(CF_HDROP):
+                files = self._read_clipboard_files()
+            elif self.win.IsClipboardFormatAvailable(CF_UNICODETEXT):
+                handle = self.win.GetClipboardData(CF_UNICODETEXT)
+                if not handle:
+                    raise C.WinError(C.get_last_error())
+                pointer = self.win.GlobalLock(handle)
+                if not pointer:
+                    raise C.WinError(C.get_last_error())
+                try:
+                    size = self.win.GlobalSize(handle)
+                    if size >= 2:
+                        raw = C.string_at(pointer, size - size % 2)
+                        text = raw.decode("utf-16-le", errors="surrogatepass").split("\0", 1)[0]
+                finally:
+                    self.win.GlobalUnlock(handle)
         finally:
             self.win.CloseClipboard()
+        return self._read_files(files) if files is not None else text
+
+    def _read_clipboard_files(self):
+        handle = self.win.GetClipboardData(CF_HDROP)
+        if not handle:
+            raise C.WinError(C.get_last_error())
+        count = self.win.DragQueryFileW(handle, 0xFFFFFFFF, None, 0)
+        paths = []
+        for index in range(count):
+            length = self.win.DragQueryFileW(handle, index, None, 0)
+            buffer = C.create_unicode_buffer(length + 1)
+            copied = self.win.DragQueryFileW(handle, index, buffer, len(buffer))
+            if copied != length:
+                raise RuntimeError("无法读取剪贴板中的文件路径")
+            paths.append(Path(buffer.value))
+        return paths
+
+    def _read_files(self, paths):
+        if not paths:
+            return ""
+        blocks = []
+        for path in paths:
+            if not path.is_file():
+                raise RuntimeError(f"剪贴板选中的项目不是普通文件：{path}")
+            try:
+                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            except OSError as exc:
+                raise RuntimeError(f"无法读取文件：{path}（{exc}）") from exc
+            payload = "\n".join(
+                encoded[offset:offset + BASE64_LINE_LENGTH]
+                for offset in range(0, len(encoded), BASE64_LINE_LENGTH)
+            )
+            blocks.append(
+                f"{FILE_BEGIN_PREFIX}{path.name}{FILE_BEGIN_SUFFIX}\n"
+                f"{payload}\n{FILE_END}"
+            )
+        return "\n".join(blocks)
 
     def run(self):
         result, kind, detail = "", "notice", ""

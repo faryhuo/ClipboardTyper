@@ -1,4 +1,5 @@
 import ctypes as C
+import base64
 import queue
 import threading
 from unittest.mock import Mock
@@ -6,9 +7,16 @@ from unittest.mock import Mock
 import pytest
 
 from clipboard_typer.core.config import ConfigError
-from clipboard_typer.platforms.windows import KEYUP, UNICODE, VK_CONTROL, VK_RETURN, text_events
+from clipboard_typer.platforms.windows import CF_HDROP, CF_UNICODETEXT, KEYUP, UNICODE, VK_CONTROL, VK_RETURN, text_events
 from clipboard_typer.services.hotkeys import HotkeyManager, PhysicalKeys
-from clipboard_typer.services.typing_service import Cancelled, TypingJob
+from clipboard_typer.services.typing_service import (
+    BASE64_LINE_LENGTH,
+    FILE_BEGIN_PREFIX,
+    FILE_BEGIN_SUFFIX,
+    FILE_END,
+    Cancelled,
+    TypingJob,
+)
 
 
 def test_hotkey_registration_failure_rolls_back_new_bindings():
@@ -161,9 +169,71 @@ def test_clipboard_preserves_utf16_and_stops_at_terminator(job):
     source = "中文复制\r\n架构说明 😀𠀀 café"
     data = (source + "\0不应读取").encode("utf-16-le")
     buffer = C.create_string_buffer(data)
+    job.win.IsClipboardFormatAvailable.side_effect = lambda format_id: format_id == CF_UNICODETEXT
     job.win.GlobalLock.return_value = C.addressof(buffer)
     job.win.GlobalSize.return_value = len(data)
     assert job.read_clipboard() == source
-    job.win.IsClipboardFormatAvailable.assert_called_once_with(13)
+    assert [call.args[0] for call in job.win.IsClipboardFormatAvailable.call_args_list] == [
+        CF_HDROP, CF_UNICODETEXT,
+    ]
     job.win.GlobalUnlock.assert_called_once()
+    job.win.CloseClipboard.assert_called_once()
+
+
+def test_clipboard_file_contents_take_priority_over_path_text(job, tmp_path):
+    first = tmp_path / "first.txt"
+    second = tmp_path / "image.png"
+    first_data = ("第一份\n" * 20).encode("utf-8")
+    second_data = b"\x89PNG\r\n\x1a\n\x00\xff"
+    first.write_bytes(first_data)
+    second.write_bytes(second_data)
+    job.win.IsClipboardFormatAvailable.side_effect = lambda format_id: format_id in {
+        CF_HDROP, CF_UNICODETEXT,
+    }
+    job.win.GetClipboardData.return_value = 42
+    paths = [str(first), str(second)]
+
+    def query_file(_handle, index, buffer, _size):
+        if index == 0xFFFFFFFF:
+            return len(paths)
+        value = paths[index]
+        if buffer is None:
+            return len(value)
+        buffer.value = value
+        return len(value)
+
+    job.win.DragQueryFileW.side_effect = query_file
+
+    first_payload = base64.b64encode(first_data).decode("ascii")
+    first_payload = "\n".join(
+        first_payload[offset:offset + BASE64_LINE_LENGTH]
+        for offset in range(0, len(first_payload), BASE64_LINE_LENGTH)
+    )
+    assert job.read_clipboard() == (
+        f"{FILE_BEGIN_PREFIX}first.txt{FILE_BEGIN_SUFFIX}\n"
+        f"{first_payload}\n{FILE_END}\n"
+        f"{FILE_BEGIN_PREFIX}image.png{FILE_BEGIN_SUFFIX}\n"
+        f"{base64.b64encode(second_data).decode('ascii')}\n{FILE_END}"
+    )
+    job.win.GlobalLock.assert_not_called()
+    job.win.CloseClipboard.assert_called_once()
+
+
+def test_clipboard_directory_is_not_typed_as_its_path(job, tmp_path):
+    job.win.IsClipboardFormatAvailable.side_effect = lambda format_id: format_id == CF_HDROP
+    job.win.GetClipboardData.return_value = 42
+    path = str(tmp_path)
+
+    def query_file(_handle, index, buffer, _size):
+        if index == 0xFFFFFFFF:
+            return 1
+        if buffer is None:
+            return len(path)
+        buffer.value = path
+        return len(path)
+
+    job.win.DragQueryFileW.side_effect = query_file
+
+    with pytest.raises(RuntimeError, match="不是普通文件"):
+        job.read_clipboard()
     job.win.CloseClipboard.assert_called_once()

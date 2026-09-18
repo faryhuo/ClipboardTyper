@@ -171,6 +171,30 @@ def test_settings_block_notice_reaches_editor_and_card_with_existing_progress(ap
     assert not app.flash.set_context.call_args.kwargs["notice"]
 
 
+def test_active_status_card_has_animated_anime_helper_and_shimmer():
+    snapshot = {
+        "state": "正在输入", "label": "快速", "total": 100, "sent": 40,
+        "percent": 40, "line": 1, "lines": 2, "remaining": 60,
+    }
+    first = card_scene("快速 · 正在输入", snapshot, animation_frame=0)
+    next_frame = card_scene("快速 · 正在输入", snapshot, animation_frame=5)
+
+    assert any(op[0] == "ellipse" for op in first)
+    assert any(op[0] == "poly" for op in first)
+    assert any(op[0] == "round" and op[2] == "#78E2CA" for op in first)
+    assert first != next_frame
+
+
+def test_anime_helper_is_hidden_outside_active_state():
+    snapshot = {
+        "state": "已暂停", "label": "暂停", "total": 100, "sent": 40,
+        "percent": 40, "line": 1, "lines": 2, "remaining": 60,
+    }
+    scene = card_scene("已暂停", snapshot, animation_frame=3)
+
+    assert not any(op[0] in ("ellipse", "poly") for op in scene)
+
+
 @pytest.mark.parametrize("mode", ["slow", "fast"])
 def test_live_paused_worker_exits_and_replacement_completes(app, monkeypatch, mode):
     old = app.job

@@ -83,6 +83,7 @@ VK_TAB, VK_RETURN, VK_SHIFT, VK_CONTROL, VK_MENU = 9, 13, 16, 17, 18
 VK_ESCAPE, VK_HOME, VK_DELETE, VK_LWIN, VK_RWIN = 27, 36, 46, 91, 92
 VK_F8 = 0x77
 KEYUP, UNICODE, EXTENDED = 0x0002, 0x0004, 0x0001
+CF_UNICODETEXT, CF_HDROP = 13, 15
 WM_HOTKEY, WM_QUIT = 0x0312, 0x0012
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 1, 2, 0x4000
 INFINITE, WAIT_FAILED = 0xFFFFFFFF, 0xFFFFFFFF
@@ -205,6 +206,7 @@ class Win32:
         bind(self.user, "DestroyMenu", BOOL, HANDLE)
         bind(self.user, "EndMenu", BOOL)
         bind(self.shell, "Shell_NotifyIconW", BOOL, DWORD, C.POINTER(NOTIFYICONDATAW))
+        bind(self.shell, "DragQueryFileW", UINT, HANDLE, UINT, C.c_wchar_p, UINT)
         bind(self.gdi, "GetStockObject", HANDLE, C.c_int)
         bind(self.kernel, "GetModuleHandleW", HANDLE, C.c_wchar_p)
         bind(self.kernel, "GlobalLock", C.c_void_p, HANDLE)
