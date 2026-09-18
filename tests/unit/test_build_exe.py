@@ -117,6 +117,9 @@ def test_rebuild_preserves_configuration_and_uses_separate_cache(builder, projec
     builds = [call.args for call in builder.run.call_args_list if call.args[:2] == ("-m", "PyInstaller")]
     assert "--clean" not in builds[0]
     assert "--clean" in builds[1]
+    for args in builds:
+        hidden = [args[index + 1] for index, value in enumerate(args) if value == "--hidden-import"]
+        assert hidden == ["_tkinter", "tkinter", "tkinter.ttk"]
     assert all(str(project / "build" / mode) == args[args.index("--workpath") + 1] for args in builds)
 
 

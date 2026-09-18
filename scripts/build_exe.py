@@ -77,6 +77,8 @@ def build(root, mode="onefile", clean=False, refresh_deps=False):
     args.extend([
         "--windowed", "--noupx", "--name", "ClipboardTyper",
         "--icon", str(root / "src/clipboard_typer/assets/clipboard-typer.ico"),
+        "--hidden-import", "_tkinter", "--hidden-import", "tkinter",
+        "--hidden-import", "tkinter.ttk",
         "--collect-data", "clipboard_typer", "--distpath", str(output),
         "--workpath", str(work), "--specpath", str(work),
         "--paths", str(root / "src"), str(root / "scripts/run_gui.py"),

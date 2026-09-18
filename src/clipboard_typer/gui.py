@@ -1,6 +1,19 @@
 """Desktop application entry point."""
 
 
+def _preload_settings_ui():
+    """Load Tk's native module before a one-file temporary directory is cleaned.
+
+    The settings window is intentionally created only when requested.  In a
+    PyInstaller one-file build that used to defer loading ``_tkinter.pyd`` as
+    well, so a long-running process could lose the extracted extension to a
+    temporary-file cleaner before the first settings window was opened.
+    """
+    import _tkinter  # noqa: F401
+    import tkinter  # noqa: F401
+    from tkinter import ttk  # noqa: F401
+
+
 
 def main(settings_path=None):
     import copy
@@ -28,6 +41,10 @@ def main(settings_path=None):
         instance.acquire()
         settings_path, log_path = application_paths(settings_path)
         logger = make_logger(log_path)
+        # PyInstaller's one-file runtime extracts extension modules into a
+        # temporary directory.  Keep Tk loaded from process startup instead
+        # of waiting hours for Settings to be opened for the first time.
+        _preload_settings_ui()
         initial_error = None
         try:
             settings = read_settings(settings_path)
