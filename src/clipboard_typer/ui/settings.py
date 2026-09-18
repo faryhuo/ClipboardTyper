@@ -10,8 +10,8 @@ from clipboard_typer.ui.branding import ASSETS, BG, BLUE, INK, MUTED, NAVY, draw
 
 
 PROFILE_FIELDS = [
-    ("keyDelay", "每字延迟", "ms；0 / -1 为整块发送", -1, 60000),
-    ("chunk", "每块字符数", "越大越快，暂停粒度越粗", 1, 256),
+    ("keyDelay", "每字延迟", "ms；至少 10，0 / -1 也逐字发送", -1, 60000),
+    ("chunk", "每块字符数", "每发送这些字符后追加块间停顿", 1, 256),
     ("pause", "块间停顿", "ms；掉字时可适当增大", 0, 60000),
     ("breatherEvery", "长停顿间隔", "块；0 为关闭", 0, 1000000),
     ("breatherPause", "长停顿时长", "ms", 0, 60000),
@@ -88,6 +88,8 @@ class ConfigService:
                         editor.save_result(data)
                     elif kind == "record":
                         editor.record_result(data)
+                    elif kind == "notice":
+                        editor.show_notice(data)
                     elif kind == "quit":
                         root.quit()
                         return
@@ -562,6 +564,9 @@ class SettingsEditor:
             self.status.configure(text="已保存并应用。回到原输入位置后，按暂停 / 继续快捷键恢复任务。", fg="#168569")
         else:
             self.status.configure(text="未保存：" + result["error"], fg="#C14450")
+
+    def show_notice(self, message):
+        self.status.configure(text=message, fg="#B77B19")
 
     def close(self):
         if self.saving:

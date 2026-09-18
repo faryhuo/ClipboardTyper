@@ -10,6 +10,11 @@ from clipboard_typer.platforms.windows import KEYUP, VK_DELETE, VK_HOME, VK_RETU
 from clipboard_typer.services.hotkeys import PhysicalKeys
 
 
+# Leave time for the target to translate VK_PACKET before submitting the next
+# character. A whole Unicode block can repeat/drop characters in some clients.
+MIN_KEY_DELAY_MS = 10
+
+
 class Cancelled(Exception):
     pass
 
@@ -163,7 +168,7 @@ class TypingJob:
 
     def tap(self, vk, source_count=0, newline=False):
         self.send(key_pair(vk), source_count, newline)
-        self.nap(self.cfg["keyDelay"])
+        self.nap(max(MIN_KEY_DELAY_MS, self.cfg["keyDelay"]))
 
     def read_clipboard(self):
         for _ in range(50):
@@ -245,20 +250,16 @@ class TypingJob:
                 if self.options["clear_auto_indent"]:
                     self.send([key_event(VK_SHIFT)] + key_pair(VK_HOME)
                               + [key_event(VK_SHIFT, flags=KEYUP)])
-                    self.nap(cfg["keyDelay"])
+                    self.nap(max(MIN_KEY_DELAY_MS, cfg["keyDelay"]))
                     self.tap(VK_DELETE)
                 self.nap(cfg["linePause"])
             for block_number, pos in enumerate(range(0, len(line), cfg["chunk"]), 1):
                 block = line[pos:pos + cfg["chunk"]]
-                if cfg["keyDelay"] <= 0:
-                    # keyDelay=0 的快速模式也真正一次发送整个块。
-                    self.send(text_events(block), source_count=len(block))
-                    if cfg["keyDelay"] == 0:
-                        self.nap(0)
-                else:
-                    for char in block:
-                        self.send(text_events(char), source_count=1)
-                        self.nap(cfg["keyDelay"])
+                for char in block:
+                    # ASCII also uses VK_PACKET. Pace every source character,
+                    # keeping both UTF-16 surrogate units in the same send.
+                    self.send(text_events(char), source_count=1)
+                    self.nap(max(MIN_KEY_DELAY_MS, cfg["keyDelay"]))
                 self.nap(cfg["pause"])
                 if cfg["breatherEvery"] and block_number % cfg["breatherEvery"] == 0:
                     self.nap(cfg["breatherPause"])

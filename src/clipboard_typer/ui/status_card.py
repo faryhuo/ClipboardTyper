@@ -62,13 +62,15 @@ def rgb(value):
     return r | (g << 8) | (b << 16)
 
 
-def card_scene(message, snapshot=None, error=False, pause_key="F8"):
+def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False):
     """Shared logical layout for Windows painting and deterministic layout checks."""
     snapshot = snapshot or {}
     state = snapshot.get("state", "就绪")
     accent, tint = BLUE, "#EAF1FF"
     if error:
         title, badge, accent, tint = "需要处理", "错误", "#D14C57", "#FFF0F1"
+    elif notice:
+        title, badge = "操作提示", snapshot.get("label", "提示")
     elif "暂停" in state or "等待松开" in state:
         title, badge, accent, tint = "输入已暂停", snapshot.get("label", "暂停"), "#B77B19", "#FFF7E7"
     elif state == "已完成":
@@ -81,7 +83,7 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8"):
         title, badge = "准备就绪", "READY"
     percent = max(0.0, min(100.0, snapshot.get("percent", 0)))
     total = snapshot.get("total", 0)
-    progress = bool(total) and not error
+    progress = bool(total) and not error and not notice
     detail = message.split("\n", 1)[0].replace("错误：", "", 1)
     if progress:
         detail = f"已发送 {snapshot['sent']:,} / {total:,} 个字符"
@@ -130,6 +132,7 @@ class StatusCard:
         self.menu_callback, self.hide_callback = menu_callback, hide_callback
         self.user_hidden, self.deadline, self.current = False, 0, None
         self.snapshot, self.error, self.pause_key = None, False, "F8"
+        self.notice = False
         self.hwnd, self.registered = None, False
         self.fonts = {}
         self.region_size = None
@@ -332,8 +335,9 @@ class StatusCard:
     def px(self, value):
         return round(value * self.scale)
 
-    def set_context(self, snapshot=None, error=False, pause_key="F8"):
+    def set_context(self, snapshot=None, error=False, pause_key="F8", notice=False):
         self.snapshot, self.error, self.pause_key = snapshot, error, pause_key
+        self.notice = notice
 
     def is_allowed(self):
         return self.enabled and not self.user_hidden and not self.faulted
@@ -460,7 +464,7 @@ class StatusCard:
             bounds = RECT(0, 0, self.width, self.height)
             self.FillRect(dc, C.byref(bounds), background)
             self.Delete(background)
-            for op in card_scene(self.current or "", self.snapshot, self.error, self.pause_key):
+            for op in card_scene(self.current or "", self.snapshot, self.error, self.pause_key, self.notice):
                 rect = RECT(*(self.px(n) for n in op[1]))
                 if op[0] == "round":
                     color, radius = op[2:]

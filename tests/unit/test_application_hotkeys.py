@@ -1,5 +1,6 @@
 """Hotkey task handoffs use fake Windows input and never type into the desktop."""
 import threading
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,7 @@ from clipboard_typer.platforms.windows import INFINITE, VK_CONTROL
 from clipboard_typer.services.application import App
 from clipboard_typer.services.hotkeys import HotkeyManager
 from clipboard_typer.services.typing_service import TypingJob
+from clipboard_typer.ui.status_card import card_scene
 
 
 @pytest.fixture
@@ -146,3 +148,54 @@ def test_held_start_keys_publish_waiting_message(app, monkeypatch):
     app.job.run()
     read.assert_called_once()
     assert app.job.snapshot()["sent"] == 3
+
+
+@pytest.mark.parametrize("action", ["slow", "fast", "pause_resume"])
+def test_settings_block_notice_reaches_editor_and_card_with_existing_progress(app, action):
+    app.job.type_text("old text")
+    app.job.pause()
+    app.config_open = True
+    app.config_service = Mock()
+    app.tray = Mock()
+    press(app, action)
+    message = app.config_service.post.call_args.args[1]
+    app.config_service.post.assert_called_once_with("notice", message)
+    app.handle_events()
+    args, kwargs = app.flash.set_context.call_args
+    scene = card_scene(app.flash.show.call_args.args[0], *args, **kwargs)
+    assert any(op[0] == "text" and op[2] == message for op in scene)
+    assert any(op[0] == "text" and op[2] == "操作提示" for op in scene)
+    assert app.wait_timeout() < INFINITE
+    app.notice_until = 0
+    app.render()
+    assert not app.flash.set_context.call_args.kwargs["notice"]
+
+
+@pytest.mark.parametrize("mode", ["slow", "fast"])
+def test_live_paused_worker_exits_and_replacement_completes(app, monkeypatch, mode):
+    old = app.job
+    paused = threading.Event()
+    reads = Mock(side_effect=["old clipboard", "new clipboard"])
+    monkeypatch.setattr(TypingJob, "read_clipboard", reads)
+
+    def pause_first_send(events):
+        if not paused.is_set():
+            old.pause()
+            paused.set()
+
+    app.win.send.side_effect = pause_first_send
+    app.worker = threading.Thread(target=old.run, daemon=True)
+    app.worker.start()
+    assert paused.wait(timeout=2)
+    press(app, mode)
+    deadline = time.monotonic() + 2
+    while app.pending_start is not None and time.monotonic() < deadline:
+        app.worker.join(timeout=0.01)
+        app.start_pending()
+    app.worker.join(timeout=2)
+    assert app.pending_start is None
+    assert app.job is not old
+    assert old.finished.is_set()
+    assert old.snapshot()["sent"] < len("old clipboard")
+    assert app.job.snapshot()["sent"] == len("new clipboard")
+    assert reads.call_count == 2

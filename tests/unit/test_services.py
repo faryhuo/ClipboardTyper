@@ -1,3 +1,4 @@
+import ctypes as C
 import queue
 import threading
 from unittest.mock import Mock
@@ -69,8 +70,8 @@ def job(settings):
 def test_typing_chunks_normalize_newlines_and_count_source_characters(job):
     job.type_text("ab中😀\r\nx")
     batches = [call.args[0] for call in job.win.send.call_args_list]
-    assert [len(batch) for batch in batches] == [4, 6, 2, 2]
-    assert batches[2][0].ki.wVk == VK_RETURN
+    assert [len(batch) for batch in batches] == [2, 2, 2, 4, 2, 2]
+    assert batches[4][0].ki.wVk == VK_RETURN
     snapshot = job.snapshot()
     assert snapshot["sent"] == snapshot["total"] == 6
     assert snapshot["line"] == snapshot["lines"] == 2
@@ -94,3 +95,75 @@ def test_paused_job_resumes_and_cancel_prevents_further_input(job):
     with pytest.raises(Cancelled):
         job.type_text("abc")
     job.win.send.assert_not_called()
+
+
+@pytest.mark.parametrize("delay", [-1, 0, 1, 10, 25])
+@pytest.mark.parametrize("chunk", [1, 12, 256])
+def test_mixed_text_survives_a_delayed_unicode_receiver(job, monkeypatch, delay, chunk):
+    # Model a client that translates queued VK_PACKET messages using the most
+    # recently submitted UTF-16 unit. Bursting distinct characters corrupts it.
+    pending, received = [], bytearray()
+    elapsed = 0
+    job.cfg.update(keyDelay=delay, chunk=chunk)
+
+    def receive(events):
+        nonlocal elapsed
+        units = [event.ki.wScan for event in events if not event.ki.dwFlags & KEYUP]
+        # A supplementary character is one atomic UTF-16 pair.
+        if len(units) == 2 and 0xD800 <= units[0] <= 0xDBFF and 0xDC00 <= units[1] <= 0xDFFF:
+            packet = b"".join(unit.to_bytes(2, "little") for unit in units)
+            pending.append(packet)
+        else:
+            pending.extend(unit.to_bytes(2, "little") for unit in units)
+        elapsed = 0
+
+    def advance(milliseconds):
+        nonlocal elapsed
+        elapsed += max(0, milliseconds)
+        if elapsed >= 10 and pending:
+            received.extend(pending[-1] * len(pending))
+            pending.clear()
+
+    job.win.send.side_effect = receive
+    monkeypatch.setattr(job, "nap", advance)
+    source = "项目采用 src 布局，安装包运行。中文复制：甲乙丙丁 | core/config.py `配置` 😀𠀀"
+    job.type_text(source)
+    assert not pending
+    assert received.decode("utf-16-le") == source
+    assert job.snapshot()["sent"] == job.snapshot()["total"] == len(source)
+
+
+def test_cancel_between_characters_stops_inside_a_large_block(job, monkeypatch):
+    job.cfg["chunk"] = 256
+    real_nap = job.nap
+
+    def cancel_during_delay(milliseconds):
+        job.cancel()
+        real_nap(milliseconds)
+
+    monkeypatch.setattr(job, "nap", cancel_during_delay)
+    with pytest.raises(Cancelled):
+        job.type_text("中文复制不应重复")
+    assert job.snapshot()["sent"] == 1
+    job.win.send.assert_called_once()
+
+
+def test_failure_mid_block_counts_only_successful_characters(job):
+    job.cfg["chunk"] = 12
+    job.win.send.side_effect = [None, RuntimeError("SendInput failed")]
+    with pytest.raises(RuntimeError, match="SendInput"):
+        job.type_text("甲乙丙")
+    assert job.snapshot()["sent"] == 1
+    assert job.win.send.call_count == 2
+
+
+def test_clipboard_preserves_utf16_and_stops_at_terminator(job):
+    source = "中文复制\r\n架构说明 😀𠀀 café"
+    data = (source + "\0不应读取").encode("utf-16-le")
+    buffer = C.create_string_buffer(data)
+    job.win.GlobalLock.return_value = C.addressof(buffer)
+    job.win.GlobalSize.return_value = len(data)
+    assert job.read_clipboard() == source
+    job.win.IsClipboardFormatAvailable.assert_called_once_with(13)
+    job.win.GlobalUnlock.assert_called_once()
+    job.win.CloseClipboard.assert_called_once()

@@ -49,9 +49,15 @@ class App:
     def pause(self, reason="手动暂停"):
         return self.job.pause(reason) if self.busy() and self.job else False
 
+    def settings_blocked(self):
+        message = "请先关闭设置窗口，再回到目标输入位置按快捷键。"
+        self.notices.put(message)
+        if self.config_service:
+            self.config_service.post("notice", message)
+
     def resume(self, from_tray=False):
         if self.config_open:
-            self.notices.put("请先关闭设置窗口，再回到原输入位置继续")
+            self.settings_blocked()
             return False
         if not self.busy() or not self.job or not self.job.is_paused():
             return False
@@ -76,6 +82,9 @@ class App:
         return job.request_resume()
 
     def toggle_pause(self):
+        if self.config_open:
+            self.settings_blocked()
+            return
         if not self.busy() or not self.job or self.job.abort.is_set():
             self.notices.put("当前没有输入任务；" + self.shortcut("slow") + " 慢速 / " + self.shortcut("fast") + " 快速开始")
         elif self.job.is_paused() and not self.job.is_resuming():
@@ -164,7 +173,7 @@ class App:
             self.notices.put("程序正在退出，无法开始新任务")
             return
         if self.config_open:
-            self.notices.put("请先关闭设置窗口，再回到原输入位置使用快捷键")
+            self.settings_blocked()
             return
         if self.busy():
             if self.job and self.job.abort.is_set():
@@ -330,7 +339,9 @@ class App:
         card_snapshot = self.job.snapshot() if self.job else None
         if card_snapshot and not self.settings["options"]["show_progress"]:
             card_snapshot = dict(card_snapshot, total=0)
-        self.flash.set_context(card_snapshot, self.error_sticky, self.shortcut("pause_resume"))
+        notice_active = bool(self.last_notice and time.monotonic() < self.notice_until)
+        self.flash.set_context(card_snapshot, self.error_sticky, self.shortcut("pause_resume"),
+                               notice=notice_active)
         if self.error_sticky:
             short = self.last_error.split("\n", 1)[-1].replace("\n", " ")
             self.tray.set_status("错误：" + short)
@@ -444,6 +455,8 @@ class App:
 
     def wait_timeout(self):
         deadlines = []
+        if self.notice_until:
+            deadlines.append(self.notice_until)
         if self.pending_start is not None:
             # The finished event can arrive just before the worker thread exits.
             # Retry only while handing off a replacement, without blocking hooks.
@@ -493,6 +506,9 @@ class App:
                         self.quit()
                     self.handle_events()
                     self.start_pending()
+                    if self.notice_until and time.monotonic() >= self.notice_until:
+                        self.notice_until = 0
+                        self.render()
                     self.flash.tick()
                     self.tray.tick()
                     if not self.shutdown.is_set():
