@@ -176,7 +176,9 @@ def card_scene(message, snapshot=None, error=False, pause_key="F8", notice=False
                 shimmer = 20 + travel * ((int(animation_frame) % 18) / 17)
                 ops.append(("round", (max(20, shimmer - 8), 131,
                                        min(progress_end, shimmer + 8), 135), "#78E2CA", 2))
-        footer = f"第 {snapshot['line']}/{snapshot['lines']} 行  ·  剩余 {snapshot['remaining']:,}"
+        # The card footer is narrow: prefer the time estimate over the count.
+        footer = (f"第 {snapshot['line']}/{snapshot['lines']} 行  ·  "
+                  + (snapshot.get("eta") or f"剩余 {snapshot['remaining']:,}"))
         hint = f"{pause_key} {'继续' if '暂停' in state or '等待松开' in state else '暂停'}"
         if state in ("已完成", "已中止", "无文本"):
             hint = "右键更多操作"

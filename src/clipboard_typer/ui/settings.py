@@ -4,19 +4,20 @@ import gc
 import queue
 import threading
 import traceback
+from clipboard_typer.core.config import OPTION_RANGES, PROFILE_RANGES
 from clipboard_typer.platforms.windows import HANDLE, UINT
 from clipboard_typer.ui.status_card import bind
 from clipboard_typer.ui.branding import ASSETS, BG, BLUE, INK, MUTED, NAVY, draw_icon, draw_logo, rounded_rect
 
 
-PROFILE_FIELDS = [
-    ("keyDelay", "每字延迟", "ms；至少 10，0 / -1 也逐字发送", -1, 60000),
-    ("chunk", "每块字符数", "每发送这些字符后追加块间停顿", 1, 256),
-    ("pause", "块间停顿", "ms；掉字时可适当增大", 0, 60000),
-    ("breatherEvery", "长停顿间隔", "块；0 为关闭", 0, 1000000),
-    ("breatherPause", "长停顿时长", "ms", 0, 60000),
-    ("linePause", "换行停顿", "ms", 0, 60000),
-]
+PROFILE_FIELDS = [(key, label, hint, *PROFILE_RANGES[key]) for key, label, hint in (
+    ("keyDelay", "每字延迟", "ms；至少 10，0 / -1 也逐字发送"),
+    ("chunk", "每块字符数", "每发送这些字符后追加块间停顿"),
+    ("pause", "块间停顿", "ms；掉字时可适当增大"),
+    ("breatherEvery", "长停顿间隔", "块；0 为关闭"),
+    ("breatherPause", "长停顿时长", "ms"),
+    ("linePause", "换行停顿", "ms"),
+)]
 HOTKEY_FIELDS = [("slow", "慢速输入"), ("fast", "快速输入"),
                  ("pause_resume", "暂停 / 继续"), ("stop", "中止输入"), ("quit", "退出程序")]
 BOOL_FIELDS = [
@@ -27,9 +28,12 @@ BOOL_FIELDS = [
     ("pause_on_modifiers", "手动按修饰键时暂停", "Ctrl / Alt / Shift / Win；松开后手动继续。"),
     ("clear_auto_indent", "换行后清除自动缩进", "发送 Shift+Home 和 Delete；不需要时可关闭。"),
 ]
-NUMERIC_FIELDS = [("start_delay_ms", "启动等待", 0, 60000),
-                  ("progress_interval_ms", "进度更新间隔", 100, 5000),
-                  ("notice_duration_ms", "普通提示时长", 1000, 60000)]
+NUMERIC_FIELDS = [(key, label, unit, *OPTION_RANGES[key]) for key, label, unit in (
+    ("start_delay_ms", "启动等待", "ms"),
+    ("progress_interval_ms", "进度更新间隔", "ms"),
+    ("notice_duration_ms", "普通提示时长", "ms"),
+    ("max_file_kib", "复制文件大小上限", "KiB"),
+)]
 
 
 class ConfigService:
@@ -478,8 +482,8 @@ class SettingsEditor:
             self.variables[path], self.inputs[path] = variable, checkbox
         numbers = self.tk.Frame(page, bg="#FFFFFF")
         numbers.pack(fill="x", pady=(10, 0))
-        for row, (key, label, lo, hi) in enumerate(NUMERIC_FIELDS):
-            self.label(numbers, label + "（ms）").grid(row=row, column=0, sticky="w", padx=(0, 20), pady=6)
+        for row, (key, label, unit, lo, hi) in enumerate(NUMERIC_FIELDS):
+            self.label(numbers, label + "（" + unit + "）").grid(row=row, column=0, sticky="w", padx=(0, 20), pady=6)
             self.spin(numbers, ("options", key), label, lo, hi, 14).grid(row=row, column=1, sticky="w", pady=6)
 
     def populate(self, settings):

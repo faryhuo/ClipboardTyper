@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 import traceback
-from clipboard_typer.core.config import ConfigError, DEFAULT_SETTINGS, parse_hotkey, read_settings, save_settings_atomic, validate_settings
+from clipboard_typer.core.config import ConfigError, DEFAULT_SETTINGS, key_label, parse_hotkey, read_settings, save_settings_atomic, validate_settings
 from clipboard_typer.core.events import UiEvent
 from clipboard_typer.platforms.windows import EventBus, HANDLE, INFINITE, KBDLLHOOKSTRUCT, MODIFIER_KEYS, MSG, VK_ESCAPE, WAIT_FAILED, WM_HOTKEY, WM_QUIT
 from clipboard_typer.services.hotkeys import HotkeyManager, PhysicalKeys
@@ -127,10 +127,7 @@ class App:
         if vk == VK_ESCAPE:
             self.cancel_recording()
             return True
-        special = {0x13: "Pause", 0x91: "ScrollLock", 0x2D: "Insert",
-                   0x24: "Home", 0x23: "End", 0x21: "PageUp", 0x22: "PageDown"}
-        key = (chr(vk) if 65 <= vk <= 90 or 48 <= vk <= 57 else
-               "F" + str(vk - 0x6F) if 0x70 <= vk <= 0x87 else special.get(vk))
+        key = key_label(vk)
         modifiers = []
         for label, codes in (("Ctrl", (17, 0xA2, 0xA3)), ("Alt", (18, 0xA4, 0xA5)),
                              ("Shift", (16, 0xA0, 0xA1)), ("Win", (91, 92))):
@@ -324,8 +321,10 @@ class App:
 
     @staticmethod
     def progress_text(snapshot):
+        eta = snapshot.get("eta")
         return (f"已发送 {snapshot['sent']:,}/{snapshot['total']:,} ({snapshot['percent']:.1f}%)"
-                f"  第 {snapshot['line']}/{snapshot['lines']} 行  剩余 {snapshot['remaining']:,}")
+                f"  第 {snapshot['line']}/{snapshot['lines']} 行  剩余 {snapshot['remaining']:,}"
+                + (f"（{eta}）" if eta else ""))
 
     def record_error(self, event):
         self.last_error = time.strftime("%Y-%m-%d %H:%M:%S") + "\n" + event.text
@@ -364,6 +363,91 @@ class App:
         self.flash.show(message, self.settings["options"]["notice_duration_ms"],
                         persistent=active and show_progress)
 
+    def on_gui_closed(self, event):
+        self.cancel_recording()
+        self.config_open = False
+
+    def on_record_start(self, event):
+        self.cancel_recording()
+        if self.config_open and self.pending_settings is None and not self.shutdown.is_set():
+            self.recording = dict(event.data)
+            self.config_service.post("record", dict(self.recording, done=False,
+                                                    text="请按组合键；Esc 取消（15 秒内）"))
+
+    def on_record_cancel(self, event):
+        if self.recording and self.recording["token"] == event.data:
+            self.cancel_recording()
+
+    def on_gui_save(self, event):
+        if self.shutdown.is_set():
+            return
+        try:
+            if self.reloading:
+                raise ConfigError("正在重新加载配置，请稍后再保存")
+            self.cancel_recording()
+            self.apply_settings(event.data, persist=True)
+        except Exception as exc:
+            self.config_service.post("result", {"ok": False, "error": str(exc)})
+            self.logger.exception("Settings GUI save failed")
+
+    def on_settings_written(self, event):
+        candidate, self.pending_settings = self.pending_settings, None
+        if event.kind == "settings_saved":
+            self.hotkeys.commit()
+            self.activate_settings(candidate)
+            result = {"ok": True, "settings": self.settings}
+            event = UiEvent("notice", "设置已保存并应用；速度与输入保护从下一次任务生效")
+        else:
+            self.hotkeys.rollback()
+            result = {"ok": False, "error": event.text}
+            event = UiEvent("error", "配置保存失败，原配置继续有效：" + event.text, event.detail)
+        if self.config_service:
+            self.config_service.post("result", result)
+        if self.exit_after_save:
+            self.shutdown.set()
+        return event
+
+    def on_ui_failure(self, event):
+        if event.kind == "gui_failed":
+            self.cancel_recording()
+            self.config_open = False
+            self.config_service = None
+        event.kind = "error"
+        return event
+
+    def on_settings_loaded(self, event):
+        self.reloading = False
+        if self.shutdown.is_set():
+            return None
+        try:
+            self.apply_settings(event.data)
+            return UiEvent("notice", "配置已加载：快捷键立即生效；速度和输入选项从下一次任务生效")
+        except Exception as exc:
+            return UiEvent("error", "配置未应用，原配置继续有效：" + str(exc), traceback.format_exc())
+
+    def on_settings_failed(self, event):
+        self.reloading = False
+        event.kind = "error"
+        return event
+
+    # Handlers return None when the event needs no redraw, otherwise the event
+    # to present. Kinds without a handler (progress, finished, ...) only redraw.
+    EVENT_HANDLERS = {
+        "gui_closed": on_gui_closed, "record_start": on_record_start,
+        "record_cancel": on_record_cancel, "gui_save": on_gui_save,
+        "settings_saved": on_settings_written, "settings_save_failed": on_settings_written,
+        "gui_error": on_ui_failure, "gui_failed": on_ui_failure, "card_error": on_ui_failure,
+        "settings_loaded": on_settings_loaded, "settings_failed": on_settings_failed,
+    }
+
+    def present(self, event):
+        if event.kind == "error":
+            self.record_error(event)
+        elif event.kind == "notice":
+            self.last_notice = event.text
+            self.notice_until = time.monotonic() + self.settings["options"]["notice_duration_ms"] / 1000
+            self.logger.info(event.text)
+
     def handle_events(self):
         dirty = False
         for value in self.notices.drain():
@@ -372,72 +456,12 @@ class App:
                 if event.kind == "error":
                     self.logger.error("Previous task: %s\n%s", event.text, event.detail)
                 continue
-            if event.kind == "gui_closed":
-                self.cancel_recording()
-                self.config_open = False
-                continue
-            if event.kind == "record_start":
-                self.cancel_recording()
-                if self.config_open and self.pending_settings is None and not self.shutdown.is_set():
-                    self.recording = dict(event.data)
-                    self.config_service.post("record", dict(self.recording, done=False,
-                                                            text="请按组合键；Esc 取消（15 秒内）"))
-                continue
-            if event.kind == "record_cancel":
-                if self.recording and self.recording["token"] == event.data:
-                    self.cancel_recording()
-                continue
-            if event.kind == "gui_save":
-                if self.shutdown.is_set():
+            handler = self.EVENT_HANDLERS.get(event.kind)
+            if handler is not None:
+                event = handler(self, event)
+                if event is None:
                     continue
-                try:
-                    if self.reloading:
-                        raise ConfigError("正在重新加载配置，请稍后再保存")
-                    self.cancel_recording()
-                    self.apply_settings(event.data, persist=True)
-                except Exception as exc:
-                    self.config_service.post("result", {"ok": False, "error": str(exc)})
-                    self.logger.exception("Settings GUI save failed")
-                continue
-            if event.kind in ("settings_saved", "settings_save_failed"):
-                candidate, self.pending_settings = self.pending_settings, None
-                if event.kind == "settings_saved":
-                    self.hotkeys.commit()
-                    self.activate_settings(candidate)
-                    result = {"ok": True, "settings": self.settings}
-                    event = UiEvent("notice", "设置已保存并应用；速度与输入保护从下一次任务生效")
-                else:
-                    self.hotkeys.rollback()
-                    result = {"ok": False, "error": event.text}
-                    event = UiEvent("error", "配置保存失败，原配置继续有效：" + event.text, event.detail)
-                if self.config_service:
-                    self.config_service.post("result", result)
-                if self.exit_after_save:
-                    self.shutdown.set()
-            elif event.kind in ("gui_error", "gui_failed", "card_error"):
-                if event.kind == "gui_failed":
-                    self.cancel_recording()
-                    self.config_open = False
-                    self.config_service = None
-                event.kind = "error"
-            if event.kind == "settings_loaded":
-                self.reloading = False
-                if self.shutdown.is_set():
-                    continue
-                try:
-                    self.apply_settings(event.data)
-                    event = UiEvent("notice", "配置已加载：快捷键立即生效；速度和输入选项从下一次任务生效")
-                except Exception as exc:
-                    event = UiEvent("error", "配置未应用，原配置继续有效：" + str(exc), traceback.format_exc())
-            elif event.kind == "settings_failed":
-                self.reloading = False
-                event.kind = "error"
-            if event.kind == "error":
-                self.record_error(event)
-            elif event.kind == "notice":
-                self.last_notice = event.text
-                self.notice_until = time.monotonic() + self.settings["options"]["notice_duration_ms"] / 1000
-                self.logger.info(event.text)
+            self.present(event)
             dirty = True
         if dirty:
             self.render()

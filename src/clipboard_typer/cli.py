@@ -8,7 +8,7 @@ from clipboard_typer.core.config import read_settings
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="ClipboardTyper — Windows 剪贴板模拟输入器")
+    parser = argparse.ArgumentParser(prog="clipboard-typer", description="ClipboardTyper — Windows 剪贴板模拟输入器")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     commands = parser.add_subparsers(dest="command")
     run = commands.add_parser("run", help="启动托盘和图形界面（默认操作）")

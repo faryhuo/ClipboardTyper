@@ -19,6 +19,19 @@ FILE_BEGIN_PREFIX = "<<<CLIPBOARD_TYPER_FILE_BEGIN:"
 FILE_BEGIN_SUFFIX = ">>>"
 FILE_END = "<<<CLIPBOARD_TYPER_FILE_END>>>"
 BASE64_LINE_LENGTH = 76
+# Estimate only after enough input to smooth out start-up and line pauses.
+ETA_MIN_SECONDS, ETA_MIN_CHARACTERS = 3, 20
+
+
+def format_eta(seconds):
+    seconds = max(1, round(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    if hours:
+        return f"约剩 {hours} 小时 {minutes} 分"
+    if minutes:
+        return f"约剩 {minutes} 分 {seconds} 秒"
+    return f"约剩 {seconds} 秒"
 
 
 class Cancelled(Exception):
@@ -42,6 +55,8 @@ class TypingJob:
         self._reason, self._state = "", "准备输入"
         self._sent, self._total, self._line, self._lines = 0, 0, 1, 1
         self._last_progress = 0
+        # Typing time excluding pauses, for the remaining-time estimate.
+        self._active_seconds, self._active_since = 0.0, None
         self.profile_name = "通用"
 
     def publish(self, text, kind="notice", detail=""):
@@ -55,12 +70,32 @@ class TypingJob:
             self._last_progress = now
         self.notices.put(UiEvent("progress", data=self))
 
+    def _set_state(self, state):
+        with self.control:
+            self._state = state
+
+    def _start_clock(self):
+        if self.armed and self._active_since is None:
+            self._active_since = time.monotonic()
+
+    def _stop_clock(self):
+        if self._active_since is not None:
+            self._active_seconds += time.monotonic() - self._active_since
+            self._active_since = None
+
     def snapshot(self):
         with self.control:
             state = ("等待松开快捷键" if self._resume_pending else "已暂停") if self._paused else self._state
+            remaining = max(0, self._total - self._sent)
+            elapsed = self._active_seconds
+            if self._active_since is not None:
+                elapsed += time.monotonic() - self._active_since
+            eta = ""
+            if remaining and elapsed >= ETA_MIN_SECONDS and self._sent >= ETA_MIN_CHARACTERS:
+                eta = format_eta(remaining * elapsed / self._sent)
             return {"state": state, "label": self.label, "reason": self._reason, "profile_name": self.profile_name,
                     "sent": self._sent, "total": self._total, "line": self._line, "lines": self._lines,
-                    "remaining": max(0, self._total - self._sent),
+                    "remaining": remaining, "eta": eta,
                     "percent": self._sent * 100 / self._total if self._total else 0}
 
     def is_paused(self):
@@ -81,6 +116,7 @@ class TypingJob:
                 return False
             changed = not self._paused or self._resume_pending
             self._paused, self._resume_pending = True, False
+            self._stop_clock()
             if changed:
                 self._reason = reason
                 self.publish("已暂停：" + reason + "；回到原窗口按 " + self.shortcut("pause_resume") + " 继续")
@@ -132,6 +168,7 @@ class TypingJob:
                 with self.control:
                     if self._paused and self._resume_pending:
                         self._paused, self._resume_pending, self._reason = False, False, ""
+                        self._start_clock()
                         self.publish(self.label + "输入继续；" + self.shortcut("pause_resume") + " 暂停")
                 continue
             if not focused:
@@ -224,10 +261,22 @@ class TypingJob:
     def _read_files(self, paths):
         if not paths:
             return ""
-        blocks = []
+        total = 0
         for path in paths:
             if not path.is_file():
                 raise RuntimeError(f"剪贴板选中的项目不是普通文件：{path}")
+            try:
+                total += path.stat().st_size
+            except OSError as exc:
+                raise RuntimeError(f"无法读取文件：{path}（{exc}）") from exc
+        # Base64 typing runs at tens of characters per second, so a mistakenly
+        # copied large file would otherwise occupy the target for hours.
+        limit = self.options["max_file_kib"] * 1024
+        if total > limit:
+            raise RuntimeError(f"复制的文件共 {total / 1024:,.0f} KiB，超过上限 {limit // 1024:,} KiB；"
+                               "可在设置中调高「复制文件大小上限」")
+        blocks = []
+        for path in paths:
             try:
                 encoded = base64.b64encode(path.read_bytes()).decode("ascii")
             except OSError as exc:
@@ -244,7 +293,9 @@ class TypingJob:
 
     def run(self):
         result, kind, detail = "", "notice", ""
+        precise_timing = False
         try:
+            precise_timing = self.win.begin_precise_timing()
             if self.physical.modifiers_down() or self.physical.down(self.trigger):
                 with self.control:
                     self._state = "等待松开快捷键"
@@ -257,7 +308,7 @@ class TypingJob:
             text = self.read_clipboard()
             if not text:
                 result = "剪贴板是空的，或不含文本"
-                self._state = "无文本"
+                self._set_state("无文本")
                 return
             with self.control:
                 self._state = "正在输入"
@@ -265,14 +316,20 @@ class TypingJob:
                     self.publish(self.label + "输入中；" + self.shortcut("pause_resume") + " 暂停 / Esc 中止")
             self.type_text(text)
             self.check_cancelled()
-            self._state, result = "已完成", self.label + "输入完成"
+            self._set_state("已完成")
+            result = self.label + "输入完成"
         except Cancelled as exc:
-            self._state, result = "已中止", "已中止：" + str(exc)
+            self._set_state("已中止")
+            result = "已中止：" + str(exc)
         except Exception as exc:
-            self._state, result, kind = "输入失败", "输入失败：" + str(exc), "error"
+            self._set_state("输入失败")
+            result, kind = "输入失败：" + str(exc), "error"
             detail = traceback.format_exc()
         finally:
+            if precise_timing:
+                self.win.end_precise_timing()
             with self.control:
+                self._stop_clock()
                 self.finished.set()
                 self.armed, self._paused, self._resume_pending = False, False, False
                 self.control.notify_all()
@@ -287,6 +344,8 @@ class TypingJob:
             self.armed = True
             self._total, self._lines = len(text), text.count("\n") + 1
             self._state = "正在输入"
+            if not self._paused:
+                self._start_clock()
         self.report_progress(force=True)
         for index, line in enumerate(text.split("\n")):
             if index:

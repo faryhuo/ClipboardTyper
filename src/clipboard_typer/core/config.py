@@ -32,8 +32,19 @@ DEFAULT_SETTINGS = {
     "options": {"stop_on_focus_loss": True, "pause_on_focus_loss": True,
                 "clear_auto_indent": True, "pause_on_modifiers": True,
                 "start_delay_ms": 200, "show_popup": True, "show_progress": True,
-                "progress_interval_ms": 250, "notice_duration_ms": 4000},
+                "progress_interval_ms": 250, "notice_duration_ms": 4000,
+                "max_file_kib": 256},
 }
+# Shared by validation and the settings editor so their limits cannot drift.
+PROFILE_RANGES = {"keyDelay": (-1, 60000), "chunk": (1, 256), "pause": (0, 60000),
+                  "breatherEvery": (0, 1000000), "breatherPause": (0, 60000), "linePause": (0, 60000)}
+OPTION_RANGES = {"start_delay_ms": (0, 60000), "progress_interval_ms": (100, 5000),
+                 "notice_duration_ms": (1000, 60000), "max_file_kib": (1, 102400)}
+MODIFIER_FLAGS = {"CTRL": 2, "CONTROL": 2, "ALT": 1, "SHIFT": 4, "WIN": 8}
+# Display labels of the non-alphanumeric primary keys; parsing ignores case.
+SPECIAL_KEYS = {"Pause": 0x13, "ScrollLock": 0x91, "Insert": 0x2D,
+                "Home": 0x24, "End": 0x23, "PageUp": 0x21, "PageDown": 0x22}
+F12 = 0x7B
 
 class ConfigError(ValueError):
     pass
@@ -56,28 +67,35 @@ def parse_hotkey(action, value):
     parts = [part.strip().upper() for part in value.split("+")]
     if not parts or any(not part for part in parts):
         raise ConfigError(f"快捷键格式无效：{value!r}")
-    names = {"CTRL": 2, "CONTROL": 2, "ALT": 1, "SHIFT": 4, "WIN": 8}
     modifiers = 0
     for part in parts[:-1]:
-        if part not in names or modifiers & names[part]:
+        if part not in MODIFIER_FLAGS or modifiers & MODIFIER_FLAGS[part]:
             raise ConfigError(f"快捷键修饰键无效或重复：{value}")
-        modifiers |= names[part]
+        modifiers |= MODIFIER_FLAGS[part]
     key = parts[-1]
-    special = {"PAUSE": 0x13, "SCROLLLOCK": 0x91, "INSERT": 0x2D,
-               "HOME": 0x24, "END": 0x23, "PAGEUP": 0x21, "PAGEDOWN": 0x22}
+    special = {name.upper(): vk for name, vk in SPECIAL_KEYS.items()}
     if len(key) == 1 and key in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789":
         if not modifiers & (1 | 2 | 8):
             raise ConfigError("字母和数字快捷键必须搭配 Ctrl、Alt 或 Win；仅 Shift 仍会影响正常打字")
         vk = ord(key)
     elif key.startswith("F") and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
         vk = 0x6F + int(key[1:])
-        if vk == 0x7B:
+        if vk == F12:
             raise ConfigError("F12 由 Windows 调试器保留，请选择其他快捷键")
     elif key in special:
         vk = special[key]
     else:
         raise ConfigError(f"不支持的快捷键：{value}；可用字母、数字、F1–F24（除 F12）等。Esc 为固定中止键。")
     return Hotkey(action, modifiers, vk, value.strip())
+
+
+def key_label(vk):
+    """Configuration name of a primary key, or None if hotkeys cannot use it."""
+    if 0x41 <= vk <= 0x5A or 0x30 <= vk <= 0x39:
+        return chr(vk)
+    if 0x70 <= vk <= 0x87:
+        return "F" + str(vk - 0x6F)
+    return next((name for name, code in SPECIAL_KEYS.items() if code == vk), None)
 
 
 def validate_settings(raw):
@@ -99,12 +117,10 @@ def validate_settings(raw):
     merge(result, raw, "settings")
     if type(result["version"]) is not int or result["version"] != 1:
         raise ConfigError("不支持此配置版本，version 必须为 1")
-    ranges = {"keyDelay": (-1, 60000), "chunk": (1, 256), "pause": (0, 60000),
-              "breatherEvery": (0, 1000000), "breatherPause": (0, 60000), "linePause": (0, 60000)}
     for prefix, profiles in (("profiles", result["profiles"]),
                              ("remote_desktop.profiles", result["remote_desktop"]["profiles"])):
         for mode, profile in profiles.items():
-            for key, (minimum, maximum) in ranges.items():
+            for key, (minimum, maximum) in PROFILE_RANGES.items():
                 value = profile[key]
                 if type(value) is not int or not minimum <= value <= maximum:
                     raise ConfigError(f"{prefix}.{mode}.{key} 必须是 {minimum}–{maximum} 的整数")
@@ -123,11 +139,9 @@ def validate_settings(raw):
                 raise ConfigError("客户端请填写进程名，例如 mstsc.exe，不填写路径或通配符")
             normalized.append(name.strip().lower())
         remote[field] = list(dict.fromkeys(normalized))
-    numeric_options = {"start_delay_ms": (0, 60000), "progress_interval_ms": (100, 5000),
-                       "notice_duration_ms": (1000, 60000)}
     for key, value in result["options"].items():
-        if key in numeric_options:
-            lo, hi = numeric_options[key]
+        if key in OPTION_RANGES:
+            lo, hi = OPTION_RANGES[key]
             if type(value) is not int or not lo <= value <= hi:
                 raise ConfigError(f"options.{key} 必须是 {lo}–{hi} 的整数")
         elif type(value) is not bool:

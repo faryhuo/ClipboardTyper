@@ -2,6 +2,7 @@ import ctypes as C
 import base64
 import queue
 import threading
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -16,6 +17,7 @@ from clipboard_typer.services.typing_service import (
     FILE_END,
     Cancelled,
     TypingJob,
+    format_eta,
 )
 
 
@@ -33,6 +35,17 @@ def test_hotkey_registration_failure_rolls_back_new_bindings():
     assert manager.actions == old_actions
     assert manager.pending is None
     win.UnregisterHotKey.assert_called_once_with(None, 2)
+
+
+def test_hotkey_ids_are_reused_after_reloads():
+    win = Mock()
+    win.RegisterHotKey.return_value = True
+    manager = HotkeyManager(win, None)
+    for key in "JKJKJ":
+        manager.apply({"slow": "Ctrl+" + key})
+    # Each reload needs one new ID while the old one is still registered.
+    assert sorted(manager.bindings.values()) == [1]
+    assert max(call.args[1] for call in win.RegisterHotKey.call_args_list) == 2
 
 
 def test_hotkey_stage_keeps_old_binding_until_commit():
@@ -237,3 +250,79 @@ def test_clipboard_directory_is_not_typed_as_its_path(job, tmp_path):
     with pytest.raises(RuntimeError, match="不是普通文件"):
         job.read_clipboard()
     job.win.CloseClipboard.assert_called_once()
+
+
+def select_files(job, *paths):
+    job.win.IsClipboardFormatAvailable.side_effect = lambda format_id: format_id == CF_HDROP
+    job.win.GetClipboardData.return_value = 42
+    values = [str(path) for path in paths]
+
+    def query_file(_handle, index, buffer, _size):
+        if index == 0xFFFFFFFF:
+            return len(values)
+        if buffer is not None:
+            buffer.value = values[index]
+        return len(values[index])
+
+    job.win.DragQueryFileW.side_effect = query_file
+
+
+def test_clipboard_files_over_size_limit_are_rejected_before_reading(job, tmp_path, monkeypatch):
+    job.options["max_file_kib"] = 1
+    first, second = tmp_path / "a.bin", tmp_path / "b.bin"
+    first.write_bytes(b"x" * 600)
+    second.write_bytes(b"y" * 600)
+    select_files(job, first, second)
+    read_bytes = Mock()
+    monkeypatch.setattr(type(first), "read_bytes", read_bytes)
+    with pytest.raises(RuntimeError, match="超过上限 1 KiB"):
+        job.read_clipboard()
+    read_bytes.assert_not_called()
+    job.win.CloseClipboard.assert_called_once()
+
+
+def test_clipboard_files_within_size_limit_are_typed(job, tmp_path):
+    job.options["max_file_kib"] = 1
+    path = tmp_path / "a.bin"
+    path.write_bytes(b"x" * 1024)
+    select_files(job, path)
+    assert job.read_clipboard().startswith(FILE_BEGIN_PREFIX + "a.bin")
+
+
+@pytest.mark.parametrize("failure", [None, RuntimeError("SendInput failed")])
+def test_run_releases_precise_timing(job, monkeypatch, failure):
+    monkeypatch.setattr(TypingJob, "read_clipboard", Mock(return_value="ab"))
+    job.win.send.side_effect = failure
+    job.win.begin_precise_timing.return_value = True
+    job.run()
+    job.win.begin_precise_timing.assert_called_once()
+    job.win.end_precise_timing.assert_called_once()
+
+
+def test_run_does_not_release_timing_it_did_not_acquire(job, monkeypatch):
+    monkeypatch.setattr(TypingJob, "read_clipboard", Mock(return_value="ab"))
+    job.win.begin_precise_timing.return_value = False
+    job.run()
+    job.win.end_precise_timing.assert_not_called()
+
+
+@pytest.mark.parametrize("seconds,text", [
+    (0.2, "约剩 1 秒"), (45, "约剩 45 秒"), (200, "约剩 3 分 20 秒"), (3900, "约剩 1 小时 5 分"),
+])
+def test_format_eta(seconds, text):
+    assert format_eta(seconds) == text
+
+
+def test_eta_excludes_paused_time(job, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    with job.control:
+        job.armed, job._total, job._sent = True, 200, 0
+        job._start_clock()
+    assert job.snapshot()["eta"] == ""
+    clock[0] += 10
+    job._sent = 100
+    assert job.snapshot()["eta"] == "约剩 10 秒"
+    job.pause()
+    clock[0] += 1000
+    assert job.snapshot()["eta"] == "约剩 10 秒"

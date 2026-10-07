@@ -65,6 +65,7 @@
     "show_popup": true,
     "show_progress": true,
     "progress_interval_ms": 250,
-    "notice_duration_ms": 4000
+    "notice_duration_ms": 4000,
+    "max_file_kib": 256
   }
 }

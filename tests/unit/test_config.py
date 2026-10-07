@@ -1,10 +1,15 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from clipboard_typer.core.config import (
     ConfigError,
     DEFAULT_SETTINGS,
+    OPTION_RANGES,
+    PROFILE_RANGES,
+    SPECIAL_KEYS,
+    key_label,
     parse_hotkey,
     read_settings,
     save_settings_atomic,
@@ -27,6 +32,7 @@ def test_legacy_settings_fill_defaults_without_mutating_input():
     [], {"unknown": 1}, {"version": True},
     {"profiles": {"fast": {"chunk": 0}}},
     {"options": {"start_delay_ms": True}},
+    {"options": {"max_file_kib": 0}},
     {"hotkeys": {"fast": "Ctrl+J"}},
     {"remote_desktop": {"executables": ["C:\\mstsc.exe"]}},
 ])
@@ -95,3 +101,25 @@ def test_remote_override_can_be_disabled(settings):
     profile, label = select_speed_profile(settings, "mstsc.exe", "fast")
     assert label == "通用"
     assert profile == settings["profiles"]["fast"]
+
+
+def test_bundled_settings_file_matches_defaults():
+    bundled = Path(__file__).resolve().parents[2] / "settings.json"
+    assert json.loads(bundled.read_text(encoding="utf-8")) == DEFAULT_SETTINGS
+
+
+@pytest.mark.parametrize("label", ["A", "Z", "0", "9", "F1", "F11", "F13", "F24", *SPECIAL_KEYS])
+def test_recorded_key_labels_round_trip_through_parser(label):
+    hotkey = parse_hotkey("slow", "Ctrl+" + label)
+    assert key_label(hotkey.key) == label
+
+
+@pytest.mark.parametrize("vk", [0x1B, 0x20, 0x60, 0xBA])
+def test_unsupported_keys_have_no_label(vk):
+    assert key_label(vk) is None
+
+
+def test_settings_editor_uses_validation_ranges():
+    from clipboard_typer.ui.settings import NUMERIC_FIELDS, PROFILE_FIELDS
+    assert {key: (lo, hi) for key, _, _, lo, hi in PROFILE_FIELDS} == PROFILE_RANGES
+    assert {key: (lo, hi) for key, _, _, lo, hi in NUMERIC_FIELDS} == OPTION_RANGES

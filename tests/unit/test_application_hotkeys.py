@@ -223,3 +223,33 @@ def test_live_paused_worker_exits_and_replacement_completes(app, monkeypatch, mo
     assert old.snapshot()["sent"] < len("old clipboard")
     assert app.job.snapshot()["sent"] == len("new clipboard")
     assert reads.call_count == 2
+
+
+def test_gui_save_writes_then_applies_settings(app, settings):
+    from clipboard_typer.core.events import UiEvent
+    app.config_service = Mock()
+    app.render = Mock()
+    candidate = dict(settings, hotkeys=dict(settings["hotkeys"], slow="Ctrl+L"))
+    app.notices.put(UiEvent("gui_save", data=candidate))
+    app.handle_events()
+    app.render.assert_not_called()  # Nothing to show until the writer reports back.
+    app.save_worker.join(timeout=2)
+    app.handle_events()
+    assert app.settings["hotkeys"]["slow"] == "Ctrl+L"
+    assert app.pending_settings is None
+    assert (app.settings_path.read_text(encoding="utf-8")).count("Ctrl+L") == 1
+    app.config_service.post.assert_called_with("result", {"ok": True, "settings": app.settings})
+    assert app.last_notice.startswith("设置已保存")
+    app.render.assert_called_once()
+
+
+def test_settings_loaded_during_shutdown_are_ignored(app, settings):
+    from clipboard_typer.core.events import UiEvent
+    app.render = Mock()
+    app.reloading = True
+    app.shutdown.set()
+    app.notices.put(UiEvent("settings_loaded", data=dict(settings, hotkeys=dict(settings["hotkeys"], slow="Ctrl+L"))))
+    app.handle_events()
+    assert not app.reloading
+    assert app.settings["hotkeys"]["slow"] == "Ctrl+J"
+    app.render.assert_not_called()
