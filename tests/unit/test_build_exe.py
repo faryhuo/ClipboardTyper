@@ -16,7 +16,7 @@ def builder(tmp_path, monkeypatch):
     environment = tmp_path / "venv"
     environment.mkdir()
     monkeypatch.setattr(module.sys, "prefix", str(environment))
-    monkeypatch.setattr(module.importlib.metadata, "distributions", lambda: [])
+    monkeypatch.setattr(module.importlib.metadata, "distributions", list)
     monkeypatch.setattr(module, "run", Mock())
     return module
 

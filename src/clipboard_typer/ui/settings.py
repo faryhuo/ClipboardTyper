@@ -1,4 +1,5 @@
 """Tk settings editor; all Tk objects stay on their own UI thread."""
+import contextlib
 import copy
 import gc
 import queue
@@ -103,10 +104,8 @@ class ConfigService:
             self.notify("gui_failed", "无法打开设置窗口：" + str(exc), traceback.format_exc())
         finally:
             if root:
-                try:
+                with contextlib.suppress(Exception):
                     root.destroy()
-                except Exception:
-                    pass
             # Dispose Tcl-owned variables on their creator thread as well.
             editor, root = None, None
             gc.collect()
