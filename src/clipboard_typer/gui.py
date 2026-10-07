@@ -16,6 +16,7 @@ def _preload_settings_ui():
 
 
 def main(settings_path=None):
+    import contextlib
     import copy
     import ctypes as C
     import sys
@@ -31,10 +32,8 @@ def main(settings_path=None):
         print("此程序使用 Windows API，只支持 Windows")
         return 1
     # Match native card typography to the Windows display scale.
-    try:
+    with contextlib.suppress(AttributeError, OSError):
         C.WinDLL("user32").SetProcessDPIAware()
-    except (AttributeError, OSError):
-        pass
     win = Win32()
     instance, logger = SingleInstance(win), None
     try:

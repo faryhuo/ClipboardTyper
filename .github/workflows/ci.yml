@@ -111,6 +111,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          # pip in .venv-build shares the global cache, so PyInstaller is not re-downloaded.
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Build desktop executable
         shell: pwsh
         run: |

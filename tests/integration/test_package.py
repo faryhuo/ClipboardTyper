@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -14,6 +15,13 @@ def run_python(tmp_path, *args):
         env=dict(os.environ, PYTHONUTF8="1"),
         capture_output=True, text=True, encoding="utf-8", timeout=15,
     )
+
+
+def test_version_comes_from_project_metadata():
+    pyproject = (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+    # tomllib is unavailable on Python 3.9; the [project] version line is unique.
+    declared = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE).group(1)
+    assert __version__ == declared
 
 
 @pytest.mark.parametrize("option", ["--help", "--version"])

@@ -64,6 +64,10 @@ class WNDCLASSW(C.Structure):
                 ("lpszClassName", C.c_wchar_p)]
 
 
+class PROCESS_POWER_THROTTLING_STATE(C.Structure):
+    _fields_ = [("Version", DWORD), ("ControlMask", DWORD), ("StateMask", DWORD)]
+
+
 class GUID(C.Structure):
     _fields_ = [("Data1", DWORD), ("Data2", WORD), ("Data3", WORD),
                 ("Data4", C.c_ubyte * 8)]
@@ -152,6 +156,8 @@ class Win32:
         self.kernel = C.WinDLL("kernel32", use_last_error=True)
         self.gdi = C.WinDLL("gdi32", use_last_error=True)
         self.shell = C.WinDLL("shell32", use_last_error=True)
+        self.winmm = C.WinDLL("winmm", use_last_error=True)
+        self.timer_throttling_disabled = False
         self.HOOKPROC = C.WINFUNCTYPE(LRESULT, C.c_int, WPARAM, LPARAM)
         self.WNDPROC = C.WINFUNCTYPE(LRESULT, HWND, UINT, WPARAM, LPARAM)
 
@@ -220,6 +226,30 @@ class Win32:
         bind(self.kernel, "ResetEvent", BOOL, HANDLE)
         bind(self.kernel, "WaitForSingleObject", DWORD, HANDLE, DWORD)
         bind(self.kernel, "CloseHandle", BOOL, HANDLE)
+        bind(self.kernel, "GetCurrentProcess", HANDLE)
+        bind(self.winmm, "timeBeginPeriod", UINT, UINT)
+        bind(self.winmm, "timeEndPeriod", UINT, UINT)
+        try:
+            bind(self.kernel, "SetProcessInformation", BOOL, HANDLE, C.c_int, C.c_void_p, DWORD)
+        except AttributeError:  # Windows 7
+            self.SetProcessInformation = None
+
+    def begin_precise_timing(self):
+        """Request 1 ms timer resolution; returns whether end_precise_timing is owed.
+
+        Timed waits otherwise round up to the ~15.6 ms system tick, so a 10 ms
+        key delay would actually take a full tick. Windows 11 ignores the
+        request for processes without visible windows unless opted out.
+        """
+        if not self.timer_throttling_disabled and self.SetProcessInformation:
+            # ProcessPowerThrottling: always honor timer resolution requests.
+            state = PROCESS_POWER_THROTTLING_STATE(1, 0x4, 0)
+            self.SetProcessInformation(self.GetCurrentProcess(), 4, C.byref(state), C.sizeof(state))
+            self.timer_throttling_disabled = True
+        return self.timeBeginPeriod(1) == 0  # TIMERR_NOERROR
+
+    def end_precise_timing(self):
+        self.timeEndPeriod(1)
 
     def application_executable(self, hwnd):
         if not hwnd:

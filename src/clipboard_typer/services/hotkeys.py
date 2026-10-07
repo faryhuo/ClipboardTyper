@@ -1,4 +1,5 @@
 """Transactional hotkey registration and physical key state."""
+import itertools
 import threading
 from clipboard_typer.core.config import ConfigError, parse_hotkey
 from clipboard_typer.platforms.windows import MODIFIER_KEYS, MOD_NOREPEAT, SIDE_MODIFIER_KEYS, VK_CONTROL, VK_MENU, VK_SHIFT
@@ -8,7 +9,7 @@ class HotkeyManager:
     """先注册新增组合，全部成功后才释放旧组合；失败保留原绑定。"""
     def __init__(self, win, hwnd):
         self.win, self.hwnd = win, hwnd
-        self.bindings, self.actions, self.next_id = {}, {}, 1
+        self.bindings, self.actions = {}, {}
         self.pending = None
 
     def stage(self, values):
@@ -18,14 +19,15 @@ class HotkeyManager:
         if len({key.combo for key in desired}) != len(desired):
             raise ConfigError("快捷键重复")
         staged = {}
+        # Retired IDs stay registered until commit, so they are skipped here and
+        # reused by later reloads; applications may only use 0x0000-0xBFFF.
+        used = set(self.bindings.values())
         try:
             for key in desired:
                 if key.combo in self.bindings:
                     continue
-                hotkey_id = self.next_id
-                self.next_id += 1
-                if hotkey_id > 0xBFFF:
-                    raise ConfigError("快捷键重载次数过多，请重新启动程序")
+                hotkey_id = next(i for i in itertools.count(1) if i not in used)
+                used.add(hotkey_id)
                 if not self.win.RegisterHotKey(self.hwnd, hotkey_id, key.modifiers | MOD_NOREPEAT, key.key):
                     raise ConfigError(f"无法注册 {key.label}，可能被其他程序占用；原快捷键保持有效")
                 staged[key.combo] = hotkey_id
