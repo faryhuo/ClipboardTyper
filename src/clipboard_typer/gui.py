@@ -8,6 +8,8 @@ def _preload_settings_ui():
     PyInstaller one-file build that used to defer loading ``_tkinter.pyd`` as
     well, so a long-running process could lose the extracted extension to a
     temporary-file cleaner before the first settings window was opened.
+    Tcl/Tk script libraries (``init.tcl``) are still read from disk when the
+    window is created; the build extracts them outside ``%TEMP%`` for that.
     """
     import _tkinter  # noqa: F401
     import tkinter  # noqa: F401

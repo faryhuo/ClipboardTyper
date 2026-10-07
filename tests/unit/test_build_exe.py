@@ -120,6 +120,10 @@ def test_rebuild_preserves_configuration_and_uses_separate_cache(builder, projec
     for args in builds:
         hidden = [args[index + 1] for index, value in enumerate(args) if value == "--hidden-import"]
         assert hidden == ["_tkinter", "tkinter", "tkinter.ttk"]
+        if mode == "onefile":
+            assert args[args.index("--runtime-tmpdir") + 1] == r"%LOCALAPPDATA%\ClipboardTyper\runtime"
+        else:
+            assert "--runtime-tmpdir" not in args
     assert all(str(project / "build" / mode) == args[args.index("--workpath") + 1] for args in builds)
 
 

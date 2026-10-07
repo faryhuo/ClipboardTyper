@@ -10,6 +10,11 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# One-file builds extract Tcl/Tk scripts and assets at startup but read some of
+# them only when Settings opens. %TEMP% cleaners (common on Citrix) can delete
+# them under a long-running tray process, so extract beside the user data.
+# The Windows bootloader expands the variable and creates missing directories.
+ONEFILE_RUNTIME_TMPDIR = r"%LOCALAPPDATA%\ClipboardTyper\runtime"
 
 
 def run(*args, cwd):
@@ -74,6 +79,8 @@ def build(root, mode="onefile", clean=False, refresh_deps=False):
     args = ["-m", "PyInstaller", "--noconfirm", "--" + mode]
     if clean:
         args.append("--clean")
+    if mode == "onefile":
+        args.extend(["--runtime-tmpdir", ONEFILE_RUNTIME_TMPDIR])
     args.extend([
         "--windowed", "--noupx", "--name", "ClipboardTyper",
         "--icon", str(root / "src/clipboard_typer/assets/clipboard-typer.ico"),
