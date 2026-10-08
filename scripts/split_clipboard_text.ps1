@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $BeginPrefix = "<<<CLIPBOARD_TYPER_FILE_BEGIN:"
+$TextBeginPrefix = "<<<CLIPBOARD_TYPER_TEXT_BEGIN:"
 $BeginSuffix = ">>>"
 $EndMarker = "<<<CLIPBOARD_TYPER_FILE_END>>>"
 
@@ -22,9 +23,12 @@ if (-not $OutputDirectory) {
 $OutputPath = [IO.Path]::GetFullPath($OutputDirectory)
 $Text = [IO.File]::ReadAllText($InputPath)
 
-$Pattern = ('(?ms)^' + [regex]::Escape($BeginPrefix) +
+# Base64 blocks hold images and binary files; text blocks hold file text as typed.
+$Pattern = ('(?ms)^(?:' + [regex]::Escape($BeginPrefix) +
     '(?<name>[^\r\n<>:]+)' + [regex]::Escape($BeginSuffix) +
-    '\r?\n(?<payload>[A-Za-z0-9+/=\r\n]*)\r?\n' +
+    '\r?\n(?<payload>[A-Za-z0-9+/=\r\n]*)|' + [regex]::Escape($TextBeginPrefix) +
+    '(?<name>[^\r\n<>:]+)' + [regex]::Escape($BeginSuffix) +
+    '\r?\n(?<text>.*?))\r?\n' +
     [regex]::Escape($EndMarker) + '(?:\r?\n|$)')
 $Matches = [regex]::Matches($Text, $Pattern)
 if ($Matches.Count -eq 0) {
@@ -46,12 +50,17 @@ foreach ($Match in $Matches) {
     if (-not $Names.Add($Name)) {
         throw "Duplicate file name in transfer text: '$Name'."
     }
-    $Payload = [regex]::Replace($Match.Groups['payload'].Value, '\s', '')
-    try {
-        $Bytes = [Convert]::FromBase64String($Payload)
+    if ($Match.Groups['text'].Success) {
+        $Bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($Match.Groups['text'].Value)
     }
-    catch {
-        throw "Invalid Base64 data for '$Name'."
+    else {
+        $Payload = [regex]::Replace($Match.Groups['payload'].Value, '\s', '')
+        try {
+            $Bytes = [Convert]::FromBase64String($Payload)
+        }
+        catch {
+            throw "Invalid Base64 data for '$Name'."
+        }
     }
     $Records.Add([pscustomobject]@{ Name = $Name; Bytes = $Bytes })
 }

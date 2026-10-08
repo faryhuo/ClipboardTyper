@@ -11,10 +11,10 @@ from clipboard_typer.core.config import ConfigError
 from clipboard_typer.platforms.windows import CF_HDROP, CF_UNICODETEXT, KEYUP, UNICODE, VK_CONTROL, VK_RETURN, text_events
 from clipboard_typer.services.hotkeys import HotkeyManager, PhysicalKeys
 from clipboard_typer.services.typing_service import (
-    BASE64_LINE_LENGTH,
     FILE_BEGIN_PREFIX,
     FILE_BEGIN_SUFFIX,
     FILE_END,
+    TEXT_BEGIN_PREFIX,
     Cancelled,
     TypingJob,
     format_eta,
@@ -217,14 +217,9 @@ def test_clipboard_file_contents_take_priority_over_path_text(job, tmp_path):
 
     job.win.DragQueryFileW.side_effect = query_file
 
-    first_payload = base64.b64encode(first_data).decode("ascii")
-    first_payload = "\n".join(
-        first_payload[offset:offset + BASE64_LINE_LENGTH]
-        for offset in range(0, len(first_payload), BASE64_LINE_LENGTH)
-    )
     assert job.read_clipboard() == (
-        f"{FILE_BEGIN_PREFIX}first.txt{FILE_BEGIN_SUFFIX}\n"
-        f"{first_payload}\n{FILE_END}\n"
+        f"{TEXT_BEGIN_PREFIX}first.txt{FILE_BEGIN_SUFFIX}\n"
+        f"{first_data.decode('utf-8')}\n{FILE_END}\n"
         f"{FILE_BEGIN_PREFIX}image.png{FILE_BEGIN_SUFFIX}\n"
         f"{base64.b64encode(second_data).decode('ascii')}\n{FILE_END}"
     )
@@ -284,9 +279,42 @@ def test_clipboard_files_over_size_limit_are_rejected_before_reading(job, tmp_pa
 def test_clipboard_files_within_size_limit_are_typed(job, tmp_path):
     job.options["max_file_kib"] = 1
     path = tmp_path / "a.bin"
-    path.write_bytes(b"x" * 1024)
+    path.write_bytes(b"\0" * 1024)
     select_files(job, path)
     assert job.read_clipboard().startswith(FILE_BEGIN_PREFIX + "a.bin")
+
+
+@pytest.mark.parametrize("data", [
+    "print('你好')\r\n".encode(),
+    "\ufeffprint('你好')\r\n".encode("utf-8"),
+    "print('你好')\r\n".encode("gb18030"),
+    "print('你好')\r\n".encode("utf-16"),
+])
+def test_single_text_file_is_typed_as_its_content(job, tmp_path, data):
+    path = tmp_path / "script.py"
+    path.write_bytes(data)
+    select_files(job, path)
+    assert job.read_clipboard() == "print('你好')\r\n"
+
+
+def test_single_image_file_is_still_base64(job, tmp_path):
+    path = tmp_path / "Logo.SVG"
+    path.write_text("<svg/>", encoding="utf-8")
+    select_files(job, path)
+    assert job.read_clipboard() == (
+        f"{FILE_BEGIN_PREFIX}Logo.SVG{FILE_BEGIN_SUFFIX}\n"
+        f"{base64.b64encode(b'<svg/>').decode('ascii')}\n{FILE_END}"
+    )
+
+
+def test_text_containing_transfer_markers_falls_back_to_base64(job, tmp_path):
+    first, second = tmp_path / "a.txt", tmp_path / "b.txt"
+    first.write_text(f"x\n{FILE_END}\n", encoding="utf-8")
+    second.write_text("plain", encoding="utf-8")
+    select_files(job, first, second)
+    text = job.read_clipboard()
+    assert text.startswith(FILE_BEGIN_PREFIX + "a.txt")
+    assert f"{TEXT_BEGIN_PREFIX}b.txt{FILE_BEGIN_SUFFIX}\nplain\n{FILE_END}" in text
 
 
 @pytest.mark.parametrize("failure", [None, RuntimeError("SendInput failed")])

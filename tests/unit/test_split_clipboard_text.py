@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from clipboard_typer.services.typing_service import BASE64_LINE_LENGTH, FILE_BEGIN_PREFIX, FILE_BEGIN_SUFFIX, FILE_END
+from clipboard_typer.services.typing_service import BASE64_LINE_LENGTH, FILE_BEGIN_PREFIX, FILE_BEGIN_SUFFIX, FILE_END, TEXT_BEGIN_PREFIX
 
 
 @pytest.mark.skipif(os.name != "nt", reason="BAT splitter requires Windows PowerShell")
@@ -26,8 +26,12 @@ def test_bat_splitter_restores_text_and_binary_files(tmp_path):
             f"{FILE_BEGIN_PREFIX}{name}{FILE_BEGIN_SUFFIX}\n"
             f"{payload}\n{FILE_END}"
         )
+    typed = {"script.py": "中文\r\n\r\nprint(1)\r\n", "blank.txt": ""}
+    for name, text in typed.items():
+        blocks.append(f"{TEXT_BEGIN_PREFIX}{name}{FILE_BEGIN_SUFFIX}\n{text}\n{FILE_END}")
+        files[name] = text.replace("\r\n", "\n").encode("utf-8")
     bundle = tmp_path / "received.txt"
-    bundle.write_text("\n".join(blocks), encoding="utf-8")
+    bundle.write_text("\n".join(blocks), encoding="utf-8", newline="\n")
     output = tmp_path / "restored"
     script = Path(__file__).resolve().parents[2] / "scripts" / "split_clipboard_text.bat"
     command = subprocess.list2cmdline([str(script), str(bundle), str(output)])

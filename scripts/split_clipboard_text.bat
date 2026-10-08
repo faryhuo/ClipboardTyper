@@ -9,5 +9,5 @@ exit /b %ERRORLEVEL%
 :usage
 echo Usage: %~nx0 INPUT_TEXT_FILE [OUTPUT_DIRECTORY] [-Force]
 echo.
-echo Recreates files from ClipboardTyper Base64 transfer text.
+echo Recreates files from ClipboardTyper file transfer text.
 exit /b 2
