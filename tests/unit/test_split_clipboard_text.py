@@ -29,9 +29,9 @@ def test_bat_splitter_restores_text_and_binary_files(tmp_path):
     typed = {"script.py": "中文\r\n\r\nprint(1)\r\n", "blank.txt": ""}
     for name, text in typed.items():
         blocks.append(f"{TEXT_BEGIN_PREFIX}{name}{FILE_BEGIN_SUFFIX}\n{text}\n{FILE_END}")
-        files[name] = text.replace("\r\n", "\n").encode("utf-8")
+        files[name] = text.encode()  # Line endings are kept as received.
     bundle = tmp_path / "received.txt"
-    bundle.write_text("\n".join(blocks), encoding="utf-8", newline="\n")
+    bundle.write_bytes("\n".join(blocks).encode())
     output = tmp_path / "restored"
     script = Path(__file__).resolve().parents[2] / "scripts" / "split_clipboard_text.bat"
     command = subprocess.list2cmdline([str(script), str(bundle), str(output)])
