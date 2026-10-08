@@ -1,6 +1,7 @@
 """Windows ABI types, native API bindings and process coordination."""
 import ctypes as C
 import ntpath
+import os
 import queue
 import threading
 
@@ -250,6 +251,13 @@ class Win32:
 
     def end_precise_timing(self):
         self.timeEndPeriod(1)
+
+    def is_own_window(self, hwnd):
+        if not hwnd:
+            return False
+        pid = DWORD()
+        self.GetWindowThreadProcessId(hwnd, C.byref(pid))
+        return pid.value == os.getpid()
 
     def application_executable(self, hwnd):
         if not hwnd:

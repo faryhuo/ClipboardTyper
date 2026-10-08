@@ -16,9 +16,16 @@ from clipboard_typer.services.hotkeys import PhysicalKeys
 # character. A whole Unicode block can repeat/drop characters in some clients.
 MIN_KEY_DELAY_MS = 10
 FILE_BEGIN_PREFIX = "<<<CLIPBOARD_TYPER_FILE_BEGIN:"
+TEXT_BEGIN_PREFIX = "<<<CLIPBOARD_TYPER_TEXT_BEGIN:"
 FILE_BEGIN_SUFFIX = ">>>"
 FILE_END = "<<<CLIPBOARD_TYPER_FILE_END>>>"
 BASE64_LINE_LENGTH = 76
+# Only images are Base64-encoded; other files are typed as their text.
+IMAGE_SUFFIXES = frozenset({
+    ".png", ".jpg", ".jpeg", ".jpe", ".jfif", ".gif", ".bmp", ".dib", ".webp",
+    ".ico", ".cur", ".tif", ".tiff", ".heic", ".heif", ".avif", ".svg", ".emf", ".wmf",
+})
+_TEXT_CONTROLS = frozenset("\t\n\r\f")
 # Estimate only after enough input to smooth out start-up and line pauses.
 ETA_MIN_SECONDS, ETA_MIN_CHARACTERS = 3, 20
 
@@ -32,6 +39,34 @@ def format_eta(seconds):
     if minutes:
         return f"约剩 {minutes} 分 {seconds} 秒"
     return f"约剩 {seconds} 秒"
+
+
+def decode_text_file(data):
+    """Return the text of a text file, or None if it looks binary."""
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encodings = ("utf-16",)
+    elif b"\0" in data:
+        return None
+    else:
+        encodings = ("utf-8-sig", "gb18030")
+    for encoding in encodings:
+        try:
+            text = data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        if any(char < " " and char not in _TEXT_CONTROLS for char in text):
+            return None
+        return text
+    return None
+
+
+def base64_block(name, data):
+    encoded = base64.b64encode(data).decode("ascii")
+    payload = "\n".join(
+        encoded[offset:offset + BASE64_LINE_LENGTH]
+        for offset in range(0, len(encoded), BASE64_LINE_LENGTH)
+    )
+    return f"{FILE_BEGIN_PREFIX}{name}{FILE_BEGIN_SUFFIX}\n{payload}\n{FILE_END}"
 
 
 class Cancelled(Exception):
@@ -269,26 +304,31 @@ class TypingJob:
                 total += path.stat().st_size
             except OSError as exc:
                 raise RuntimeError(f"无法读取文件：{path}（{exc}）") from exc
-        # Base64 typing runs at tens of characters per second, so a mistakenly
+        # Typing runs at tens of characters per second, so a mistakenly
         # copied large file would otherwise occupy the target for hours.
         limit = self.options["max_file_kib"] * 1024
         if total > limit:
             raise RuntimeError(f"复制的文件共 {total / 1024:,.0f} KiB，超过上限 {limit // 1024:,} KiB；"
                                "可在设置中调高「复制文件大小上限」")
-        blocks = []
+        files = []
         for path in paths:
             try:
-                encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+                data = path.read_bytes()
             except OSError as exc:
                 raise RuntimeError(f"无法读取文件：{path}（{exc}）") from exc
-            payload = "\n".join(
-                encoded[offset:offset + BASE64_LINE_LENGTH]
-                for offset in range(0, len(encoded), BASE64_LINE_LENGTH)
-            )
-            blocks.append(
-                f"{FILE_BEGIN_PREFIX}{path.name}{FILE_BEGIN_SUFFIX}\n"
-                f"{payload}\n{FILE_END}"
-            )
+            is_image = path.suffix.lower() in IMAGE_SUFFIXES
+            files.append((path.name, data, None if is_image else decode_text_file(data)))
+        if len(files) == 1 and files[0][2] is not None:
+            # A single text file is typed as-is, ready to save on the target.
+            return files[0][2]
+        blocks = []
+        for name, data, text in files:
+            # Binary non-image files cannot be typed as text; a text body that
+            # contains our markers would break splitting, so Base64 is kept.
+            if text is None or "<<<CLIPBOARD_TYPER_" in text:
+                blocks.append(base64_block(name, data))
+            else:
+                blocks.append(f"{TEXT_BEGIN_PREFIX}{name}{FILE_BEGIN_SUFFIX}\n{text}\n{FILE_END}")
         return "\n".join(blocks)
 
     def run(self):

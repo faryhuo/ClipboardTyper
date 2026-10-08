@@ -49,15 +49,18 @@ class App:
     def pause(self, reason="手动暂停"):
         return self.job.pause(reason) if self.busy() and self.job else False
 
-    def settings_blocked(self):
-        message = "请先关闭设置窗口，再回到目标输入位置按快捷键。"
+    def own_window_blocked(self):
+        # The settings window may stay open, but never type into our own UI.
+        if not self.win.is_own_window(self.win.GetForegroundWindow()):
+            return False
+        message = "请先点击目标输入位置，再按快捷键；设置窗口可保持打开。"
         self.notices.put(message)
-        if self.config_service:
+        if self.config_open and self.config_service:
             self.config_service.post("notice", message)
+        return True
 
     def resume(self, from_tray=False):
-        if self.config_open:
-            self.settings_blocked()
+        if not from_tray and self.own_window_blocked():
             return False
         if not self.busy() or not self.job or not self.job.is_paused():
             return False
@@ -82,9 +85,6 @@ class App:
         return job.request_resume()
 
     def toggle_pause(self):
-        if self.config_open:
-            self.settings_blocked()
-            return
         if not self.busy() or not self.job or self.job.abort.is_set():
             self.notices.put("当前没有输入任务；" + self.shortcut("slow") + " 慢速 / " + self.shortcut("fast") + " 快速开始")
         elif self.job.is_paused() and not self.job.is_resuming():
@@ -153,7 +153,7 @@ class App:
                 job = self.job
                 captured = self.record_key(key.vkCode, down)
                 if (not captured and down and key.vkCode == VK_ESCAPE and job
-                        and not self.config_open and not (self.tray and self.tray.in_menu)
+                        and not (self.tray and self.tray.in_menu)
                         and job.origin_hwnd and self.win.GetForegroundWindow() == job.origin_hwnd):
                     self.stop()
                 elif (down and key.vkCode in MODIFIER_KEYS and job and job.armed
@@ -169,8 +169,7 @@ class App:
         if self.shutdown.is_set() or self.exit_after_save:
             self.notices.put("程序正在退出，无法开始新任务")
             return
-        if self.config_open:
-            self.settings_blocked()
+        if self.own_window_blocked():
             return
         if self.busy():
             if self.job and self.job.abort.is_set():
