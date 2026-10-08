@@ -20,6 +20,7 @@ def app(settings, tmp_path):
         profile.update(keyDelay=-1, chunk=2, pause=0, breatherEvery=0, linePause=0)
     win = Mock()
     win.GetForegroundWindow.return_value = 123
+    win.is_own_window.return_value = False
     win.application_executable.return_value = "editor.exe"
     result = App(win, None, settings, tmp_path / "settings.json", tmp_path / "log", Mock())
     result.flash = Mock(deadline=0)
@@ -116,7 +117,7 @@ def test_focus_change_during_handoff_requires_another_hotkey(app):
 @pytest.mark.parametrize("state,message", [
     ("running", "当前任务正在输入"),
     ("stopping", "正在中止当前任务"),
-    ("settings", "请先关闭设置窗口"),
+    ("settings", "请先点击目标输入位置"),
 ])
 def test_unavailable_start_explains_why(app, mode, state, message):
     old = app.job
@@ -124,6 +125,7 @@ def test_unavailable_start_explains_why(app, mode, state, message):
         old.cancel()
     elif state == "settings":
         app.config_open = True
+        app.win.is_own_window.return_value = True
     press(app, mode)
     assert app.job is old
     assert app.pending_start is None
@@ -150,11 +152,31 @@ def test_held_start_keys_publish_waiting_message(app, monkeypatch):
     assert app.job.snapshot()["sent"] == 3
 
 
+def test_open_settings_window_does_not_block_new_job(app, monkeypatch):
+    app.config_open = True
+    app.config_service = Mock()
+    app.worker.is_alive.return_value = False
+    monkeypatch.setattr(TypingJob, "read_clipboard", Mock(return_value="new"))
+    press(app, "slow")
+    app.worker.join(timeout=2)
+    assert app.job.snapshot()["sent"] == len("new")
+    app.config_service.post.assert_not_called()
+
+
+def test_open_settings_window_does_not_block_resume(app):
+    app.job.type_text("old")
+    app.job.pause()
+    app.config_open = True
+    press(app, "pause_resume")
+    assert app.job.is_resuming()
+
+
 @pytest.mark.parametrize("action", ["slow", "fast", "pause_resume"])
 def test_settings_block_notice_reaches_editor_and_card_with_existing_progress(app, action):
     app.job.type_text("old text")
     app.job.pause()
     app.config_open = True
+    app.win.is_own_window.return_value = True
     app.config_service = Mock()
     app.tray = Mock()
     press(app, action)
