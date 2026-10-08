@@ -40,7 +40,7 @@ def test_bat_splitter_restores_text_and_binary_files(tmp_path):
         ["cmd.exe", "/d", "/s", "/c", command],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,  # PowerShell cold start on CI runners can exceed 30 s.
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
